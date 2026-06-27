@@ -1,0 +1,35 @@
+# Manual runs:
+#   docker compose build
+#   docker compose run --rm triage
+#   docker compose run --rm cli unsubscribe --account work
+#   docker compose run --rm cli find "Q3 launch marketing"
+#
+# Provide secrets via a .env file (see .env.example):
+#   ANTHROPIC_API_KEY=...
+#   FASTMAIL_TOKEN=...                       (single account), or
+#   FASTMAIL_ACCOUNTS=work:tok_a,personal:tok_b   (multiple accounts)
+
+services:
+  # Generic entrypoint — pass any subcommand/args after the service name.
+  cli:
+    build: .
+    image: fastmail-triage
+    env_file: .env
+    volumes:
+      - fastmail-triage-data:/data
+
+  # Convenience service: `docker compose run --rm triage`
+  triage:
+    extends: cli
+    command: ["triage", "--account", "all"]
+
+  unsubscribe:
+    extends: cli
+    command: ["unsubscribe", "--account", "all"]
+
+  filters:
+    extends: cli
+    command: ["filters"]
+
+volumes:
+  fastmail-triage-data:

@@ -1,0 +1,83 @@
+#!/usr/bin/env bun
+import { Command } from "commander";
+import * as ui from "./ui.ts";
+import { triageCommand } from "./commands/triage.ts";
+import { unsubscribeCommand } from "./commands/unsubscribe.ts";
+import { findCommand } from "./commands/find.ts";
+import { filtersCommand } from "./commands/filters.ts";
+import {
+  accountAdd,
+  accountList,
+  accountRemove,
+  accountDefault,
+} from "./commands/account.ts";
+
+const program = new Command();
+
+program
+  .name("fastmail-triage")
+  .description("AI-powered Fastmail inbox assistant (triage, unsubscribe, find, filters).")
+  .version("0.1.0");
+
+// Shared --account option: a name, or "all" to fan out across every account.
+const accountOpt = ["-a, --account <name>", 'account name, or "all" for every account'] as const;
+
+program
+  .command("triage")
+  .description("Sort recent/unread mail into reply / fyi / noise")
+  .option(...accountOpt)
+  .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
+  .option("--all", "include read mail, not just unread", false)
+  .option("--json", "output raw JSON", false)
+  .action((opts) => run(() => triageCommand(opts)));
+
+program
+  .command("unsubscribe")
+  .description("Find newsletters and promotional senders to cut")
+  .option(...accountOpt)
+  .option("-n, --limit <n>", "max emails to scan", (v) => parseInt(v, 10), 100)
+  .option("--json", "output raw JSON", false)
+  .action((opts) => run(() => unsubscribeCommand(opts)));
+
+program
+  .command("find <query...>")
+  .description('Search a topic/thread and summarize it, e.g. "Q3 launch marketing"')
+  .option(...accountOpt)
+  .option("-n, --limit <n>", "max emails to fetch", (v) => parseInt(v, 10), 20)
+  .option("--from <email>", "restrict to a sender")
+  .option("--after <date>", "only mail after YYYY-MM-DD")
+  .option("--before <date>", "only mail before YYYY-MM-DD")
+  .action((query: string[], opts) => run(() => findCommand(query.join(" "), opts)));
+
+program
+  .command("filters")
+  .description("Suggest filter/label rules based on your inbox")
+  .option(...accountOpt)
+  .option("-n, --limit <n>", "max emails to analyze", (v) => parseInt(v, 10), 100)
+  .option("--json", "output raw JSON", false)
+  .action((opts) => run(() => filtersCommand(opts)));
+
+// ── account management ───────────────────────────────────────────────────────
+const account = program.command("account").description("Manage Fastmail accounts");
+account
+  .command("add <name>")
+  .description("Add or update an account (token via prompt or FASTMAIL_TOKEN)")
+  .option("--default", "make this the default account", false)
+  .action((name, opts) => run(() => accountAdd(name, opts)));
+account.command("list").description("List configured accounts").action(() => run(async () => accountList()));
+account.command("remove <name>").description("Remove an account").action((name) => run(async () => accountRemove(name)));
+account.command("default <name>").description("Set the default account").action((name) => run(async () => accountDefault(name)));
+
+async function run(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    ui.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+}
+
+program.parseAsync().catch((err) => {
+  ui.error(`Error: ${err.message}`);
+  process.exit(1);
+});
