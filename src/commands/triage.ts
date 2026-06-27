@@ -2,6 +2,7 @@ import pc from "picocolors";
 import { FastmailEngine, senderOf } from "../fastmail.ts";
 import { triageEmails, type Category, type TriageResult } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
+import { JmapClient } from "../jmap.ts";
 import * as ui from "../ui.ts";
 
 interface Opts {
@@ -9,12 +10,22 @@ interface Opts {
   limit: number;
   all?: boolean;
   json?: boolean;
+  dryRun?: boolean;
 }
 
+// Display headers for each bucket.
 const LABELS: Record<Category, string> = {
   reply: "Needs Reply",
   fyi: "FYI",
   noise: "Noise / Skip",
+};
+
+// Parent label + child mailbox names applied in Fastmail.
+const PARENT_LABEL = "Triage";
+const MAILBOX_NAMES: Record<Category, string> = {
+  reply: "Needs Reply",
+  fyi: "FYI",
+  noise: "Noise",
 };
 
 const COLOR: Record<Category, (s: string) => string> = {
@@ -64,5 +75,39 @@ export async function triageCommand(opts: Opts): Promise<void> {
         }),
       });
     }
+
+    if (opts.dryRun) {
+      ui.info(`\nDry run — no labels applied. Re-run without --dry-run to label under "${PARENT_LABEL}/".`);
+      continue;
+    }
+
+    await applyLabels(account.token, buckets);
   }
+}
+
+async function applyLabels(
+  token: string,
+  buckets: Record<Category, TriageResult[]>,
+): Promise<void> {
+  const used = (Object.keys(buckets) as Category[]).filter((c) => buckets[c].length > 0);
+  if (used.length === 0) return;
+
+  ui.info(`\nApplying labels under "${PARENT_LABEL}/"…`);
+  const jmap = new JmapClient(token);
+
+  // Create the Triage parent + only the child labels we actually need.
+  const childNames = used.map((c) => MAILBOX_NAMES[c]);
+  const { children } = await jmap.ensureLabelTree(PARENT_LABEL, childNames);
+
+  // Map every triaged email id → its category's label mailbox id.
+  const assignments: Record<string, string> = {};
+  for (const cat of used) {
+    const mailboxId = children[MAILBOX_NAMES[cat]]!;
+    for (const item of buckets[cat]) assignments[item.id] = mailboxId;
+  }
+
+  const count = await jmap.addLabels(assignments);
+  ui.info(
+    pc.green(`✓ Labeled ${count} email${count === 1 ? "" : "s"} (kept in Inbox).`),
+  );
 }
