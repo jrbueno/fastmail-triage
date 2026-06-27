@@ -1,8 +1,7 @@
 import pc from "picocolors";
-import { FastmailEngine, senderOf } from "../fastmail.ts";
+import { FastmailEngine, senderOf, type Mailbox } from "../fastmail.ts";
 import { triageEmails, type Category, type TriageResult } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
-import { JmapClient } from "../jmap.ts";
 import * as ui from "../ui.ts";
 
 interface Opts {
@@ -20,7 +19,7 @@ const LABELS: Record<Category, string> = {
   noise: "Noise / Skip",
 };
 
-// Parent label + child mailbox names applied in Fastmail.
+// Parent mailbox + child mailbox (leaf) names that emails are moved into.
 const PARENT_LABEL = "Triage";
 const MAILBOX_NAMES: Record<Category, string> = {
   reply: "Needs Reply",
@@ -77,37 +76,56 @@ export async function triageCommand(opts: Opts): Promise<void> {
     }
 
     if (opts.dryRun) {
-      ui.info(`\nDry run — no labels applied. Re-run without --dry-run to label under "${PARENT_LABEL}/".`);
+      ui.info(`\nDry run — nothing moved. Re-run without --dry-run to file mail under "${PARENT_LABEL}/".`);
       continue;
     }
 
-    await applyLabels(account.token, buckets);
+    await applyMoves(engine, buckets);
   }
 }
 
-async function applyLabels(
-  token: string,
+async function applyMoves(
+  engine: FastmailEngine,
   buckets: Record<Category, TriageResult[]>,
 ): Promise<void> {
   const used = (Object.keys(buckets) as Category[]).filter((c) => buckets[c].length > 0);
   if (used.length === 0) return;
 
-  ui.info(`\nApplying labels under "${PARENT_LABEL}/"…`);
-  const jmap = new JmapClient(token);
+  // The engine can't create mailboxes — verify the targets exist first.
+  const mailboxes = await engine.listMailboxes();
+  const parent = mailboxes.find((m) => m.name === PARENT_LABEL && !m.parentId);
+  const missing: string[] = [];
+  const targetByCat = new Map<Category, Mailbox>();
 
-  // Create the Triage parent + only the child labels we actually need.
-  const childNames = used.map((c) => MAILBOX_NAMES[c]);
-  const { children } = await jmap.ensureLabelTree(PARENT_LABEL, childNames);
-
-  // Map every triaged email id → its category's label mailbox id.
-  const assignments: Record<string, string> = {};
   for (const cat of used) {
-    const mailboxId = children[MAILBOX_NAMES[cat]]!;
-    for (const item of buckets[cat]) assignments[item.id] = mailboxId;
+    const leaf = MAILBOX_NAMES[cat];
+    // Prefer a child under the Triage parent; fall back to any mailbox with that name.
+    const box =
+      mailboxes.find((m) => m.name === leaf && parent && m.parentId === parent.id) ??
+      mailboxes.find((m) => m.name === leaf);
+    if (box) targetByCat.set(cat, box);
+    else missing.push(`${PARENT_LABEL}/${leaf}`);
   }
 
-  const count = await jmap.addLabels(assignments);
-  ui.info(
-    pc.green(`✓ Labeled ${count} email${count === 1 ? "" : "s"} (kept in Inbox).`),
-  );
+  if (missing.length > 0) {
+    ui.warn(
+      `\nMissing mailboxes (the engine can't create them):\n` +
+        missing.map((m) => `  • ${m}`).join("\n") +
+        `\n\nCreate them once in Fastmail (Settings → Folders, nested under "${PARENT_LABEL}"), then re-run.`,
+    );
+  }
+
+  let moved = 0;
+  for (const cat of used) {
+    const box = targetByCat.get(cat);
+    if (!box) continue;
+    for (const item of buckets[cat]) {
+      await engine.moveEmail(item.id, box.name);
+      moved++;
+    }
+  }
+
+  if (moved > 0) {
+    ui.info(pc.green(`\n✓ Moved ${moved} email${moved === 1 ? "" : "s"} into "${PARENT_LABEL}/".`));
+  }
 }

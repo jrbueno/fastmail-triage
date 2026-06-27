@@ -37,6 +37,7 @@ export interface Mailbox {
   id: string;
   name: string;
   role?: string;
+  parentId?: string | null;
 }
 
 interface Envelope<T> {
@@ -151,6 +152,11 @@ export class FastmailEngine {
 
   async getEmail(id: string): Promise<Email> {
     return this.run<Email>(["get", id]);
+  }
+
+  /** Move an email into a mailbox (resolved by leaf name or role). */
+  async moveEmail(id: string, mailbox: string): Promise<void> {
+    await this.run<unknown>(["move", "--to", mailbox, id]);
   }
 
   async search(filters: SearchFilters, limit = 20): Promise<Email[]> {
