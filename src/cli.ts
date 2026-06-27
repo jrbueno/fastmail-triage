@@ -24,11 +24,12 @@ const accountOpt = ["-a, --account <name>", 'account name, or "all" for every ac
 
 program
   .command("triage")
-  .description("Sort recent/unread mail into reply / fyi / noise")
+  .description("Sort mail into reply / fyi / noise and label it under Triage/")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
   .option("--all", "include read mail, not just unread", false)
-  .option("--json", "output raw JSON", false)
+  .option("--dry-run", "preview only — don't apply labels", false)
+  .option("--json", "output raw JSON (implies no labeling)", false)
   .action((opts) => run(() => triageCommand(opts)));
 
 program
