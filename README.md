@@ -4,7 +4,7 @@ AI-powered Fastmail inbox assistant. Four commands:
 
 | Command | What it does |
 |---|---|
-| `triage` | Sorts unread/recent mail into **Needs Reply / FYI / Noise** and labels each email under a `Triage/` parent label in Fastmail (kept in Inbox). |
+| `triage` | Sorts unread/recent mail into **Needs Reply / FYI / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
 | `unsubscribe` | Finds newsletters & promo senders cluttering your inbox so you can cut them in one pass. |
 | `find <query>` | Pulls a thread/topic (`"what did marketing say about the Q3 launch?"`) and summarizes it. |
 | `filters` | Suggests filter/label rules based on what's actually in your inbox. |
@@ -35,8 +35,8 @@ bun run src/cli.ts account add personal
 ## Usage
 
 ```bash
-bun run src/cli.ts triage                    # classify + label under Triage/
-bun run src/cli.ts triage --dry-run          # preview only, apply no labels
+bun run src/cli.ts triage                    # classify + file under Triage/
+bun run src/cli.ts triage --dry-run          # preview only, move nothing
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts unsubscribe
@@ -98,11 +98,12 @@ fastmail-cli (JMAP)  →  Email JSON  →  Claude (Sonnet)  →  formatted outpu
        per-account token isolation via XDG_CONFIG_HOME
 ```
 
-`triage` is the only command that writes: it creates a `Triage/` label tree
-(`Needs Reply`, `FYI`, `Noise`) and **adds** the matching label to each email
-while keeping it in the Inbox — nothing is moved, deleted, or sent. Use
-`--dry-run` to preview without applying. Labeling uses a small direct-JMAP
-client (`src/jmap.ts`) since the engine binary can't create mailboxes.
+`triage` is the only command that writes: it **moves** each classified email
+into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Noise`) via the engine's
+`move`, which removes it from the Inbox. Use `--dry-run` to preview without
+moving. The engine can't create mailboxes, so create the `Triage/` children once
+in Fastmail (Settings → Folders); `triage` warns about any that are missing and
+moves the rest.
 
 `unsubscribe` and `filters` are read-only — they produce suggestions you act on
 yourself in Fastmail.
