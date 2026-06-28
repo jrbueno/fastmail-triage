@@ -36,9 +36,12 @@ program
 
 program
   .command("unsubscribe")
-  .description("Find newsletters and promotional senders to cut")
+  .description("Find newsletters/promos and actually unsubscribe (List-Unsubscribe)")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to scan", (v) => parseInt(v, 10), 100)
+  .option("-m, --mailbox <name>", "scan a reviewed folder (e.g. Triage/Unsubscribe leaf 'Unsubscribe'); every sender is a target")
+  .option("-s, --sender <email>", "target a single sender")
+  .option("--apply", "actually unsubscribe (default: preview only)", false)
   .option("--json", "output raw JSON", false)
   .action((opts) => run(() => unsubscribeCommand(opts)));
 

@@ -159,6 +159,16 @@ export class FastmailEngine {
     await this.run<unknown>(["move", "--to", mailbox, id]);
   }
 
+  /** Send a plain-text email (used for mailto: unsubscribe requests). */
+  async send(opts: { to: string; subject: string; body: string }): Promise<void> {
+    await this.run<unknown>([
+      "send",
+      "--to", opts.to,
+      "--subject", opts.subject,
+      "--body", opts.body,
+    ]);
+  }
+
   async search(filters: SearchFilters, limit = 20): Promise<Email[]> {
     const args = ["search"];
     if (filters.text) args.push("--text", filters.text);

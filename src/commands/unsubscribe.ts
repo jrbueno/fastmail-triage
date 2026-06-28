@@ -1,13 +1,26 @@
-import { FastmailEngine } from "../fastmail.ts";
+import pc from "picocolors";
+import { FastmailEngine, senderOf } from "../fastmail.ts";
 import { findUnsubscribeCandidates } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
+import { JmapClient } from "../jmap.ts";
+import { groupBySender, executeUnsub, type Method } from "../unsub.ts";
 import * as ui from "../ui.ts";
 
 interface Opts {
   account?: string;
   limit: number;
+  mailbox?: string;
+  sender?: string;
+  apply?: boolean;
   json?: boolean;
 }
+
+const METHOD_LABEL: Record<Method, string> = {
+  "one-click": "1-click (auto)",
+  email: "email (auto)",
+  manual: "browser (manual)",
+  none: "no method",
+};
 
 export async function unsubscribeCommand(opts: Opts): Promise<void> {
   const accounts = resolveAccounts(opts.account);
@@ -15,38 +28,87 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
   for (const account of accounts) {
     if (accounts.length > 1) ui.accountBanner(account.name);
     const engine = new FastmailEngine(account);
+    const jmap = new JmapClient(account.token);
 
-    ui.info("Fetching emails…");
-    const emails = await engine.listEmails({ limit: opts.limit });
+    // Gather the candidate emails.
+    const where = opts.sender
+      ? `sender ${opts.sender}`
+      : (opts.mailbox ?? "Inbox");
+    ui.info(`Scanning ${where}…`);
+    let emails = await jmap.queryEmails({
+      mailbox: opts.mailbox,
+      from: opts.sender,
+      limit: opts.limit,
+    });
     if (emails.length === 0) {
       ui.info("No emails found.");
       continue;
     }
 
-    ui.info(`Scanning ${emails.length} emails for unsubscribe candidates…`);
-    const candidates = await findUnsubscribeCandidates(emails);
+    // In Inbox discovery mode (no explicit folder or sender), let Claude narrow
+    // to newsletters/promo. A reviewed folder or an explicit sender is taken as-is.
+    if (!opts.sender && !opts.mailbox) {
+      ui.info(`Identifying unsubscribe candidates among ${emails.length} emails…`);
+      const candidates = await findUnsubscribeCandidates(emails);
+      const wanted = new Set(candidates.map((c) => c.sender_email.toLowerCase()));
+      emails = emails.filter((e) => wanted.has(senderOf(e).email.toLowerCase()));
+    }
+
+    if (emails.length === 0) {
+      ui.info("No unsubscribe candidates found.");
+      continue;
+    }
+
+    // Look up the List-Unsubscribe method for each, grouped per sender.
+    ui.info("Reading List-Unsubscribe headers…");
+    const infos = await jmap.getUnsubscribeInfo(emails.map((e) => e.id));
+    const senders = groupBySender(infos);
 
     if (opts.json) {
-      console.log(JSON.stringify(candidates, null, 2));
+      console.log(JSON.stringify(senders, null, 2));
       continue;
     }
 
-    if (candidates.length === 0) {
-      ui.info("No obvious unsubscribe candidates found.");
-      continue;
-    }
-
-    ui.header(`Unsubscribe Candidates (${candidates.length})`);
+    ui.header(`Unsubscribe Candidates (${senders.length} senders)`);
     ui.table({
-      head: ["Sender", "Email", "Example Subject", "Why"],
-      colWidths: [20, 28, 32, 34],
-      rows: candidates.map((c) => [
-        c.sender_name,
-        c.sender_email,
-        c.subject_example,
-        c.reason,
+      head: ["Sender", "Email", "#", "Method"],
+      colWidths: [24, 32, 5, 18],
+      rows: senders.map((s) => [
+        s.senderName || "",
+        s.senderEmail,
+        String(s.count),
+        METHOD_LABEL[s.method],
       ]),
     });
-    ui.info("\nTip: open these in Fastmail and use its built-in unsubscribe, or block the sender.");
+
+    if (!opts.apply) {
+      const auto = senders.filter((s) => s.method === "one-click" || s.method === "email").length;
+      ui.info(
+        `\n${auto} of ${senders.length} can be unsubscribed automatically. ` +
+          `Review the list, then re-run with ${pc.bold("--apply")} to unsubscribe.`,
+      );
+      continue;
+    }
+
+    // --apply: actually unsubscribe.
+    ui.info(pc.yellow(`\nUnsubscribing… (this contacts each sender)`));
+    let ok = 0;
+    let manual = 0;
+    for (const sender of senders) {
+      const result = await executeUnsub(sender, engine);
+      if (result.ok) {
+        ok++;
+        ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
+      } else if (sender.method === "manual") {
+        manual++;
+        ui.info(pc.dim(`  ↗ ${sender.senderEmail} — ${result.detail}`));
+      } else {
+        ui.info(pc.red(`  ✗ ${sender.senderEmail} — ${result.detail}`));
+      }
+    }
+    ui.info(
+      `\nDone: ${pc.green(`${ok} unsubscribed`)}, ${manual} need a browser, ` +
+        `${senders.length - ok - manual} failed/unsupported.`,
+    );
   }
 }

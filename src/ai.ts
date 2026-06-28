@@ -48,10 +48,12 @@ async function askText(prompt: string, maxTokens = 1024): Promise<string> {
 
 function emailDigest(email: Email, includeBody: boolean): string {
   const { name, email: addr } = senderOf(email);
+  const seen = email.keywords?.["$seen"] === true;
   const lines = [
     `From: ${name} <${addr}>`,
     `Subject: ${email.subject ?? "(no subject)"}`,
     `Date: ${email.receivedAt ?? ""}`,
+    `Status: ${seen ? "read" : "unread"}`,
   ];
   if (includeBody) {
     const body = extractBody(email).slice(0, 1500);
@@ -64,8 +66,21 @@ function emailDigest(email: Email, includeBody: boolean): string {
 
 // ── Triage ────────────────────────────────────────────────────────────────
 
-export type Category = "reply" | "fyi" | "offers" | "newsletter" | "noise";
-export const CATEGORIES: Category[] = ["reply", "fyi", "offers", "newsletter", "noise"];
+export type Category =
+  | "reply"
+  | "fyi"
+  | "offers"
+  | "newsletter"
+  | "unsubscribe"
+  | "noise";
+export const CATEGORIES: Category[] = [
+  "reply",
+  "fyi",
+  "offers",
+  "newsletter",
+  "unsubscribe",
+  "noise",
+];
 
 export interface TriageResult {
   id: string;
@@ -83,9 +98,12 @@ export async function triageEmails(emails: Email[]): Promise<TriageResult[]> {
     "  - fyi: informational, worth skimming, no reply needed (receipts, alerts, confirmations)\n" +
     "  - offers: promotional sales, discounts, deals, marketing from retailers\n" +
     "  - newsletter: recurring subscriptions, digests, editorial content you signed up for\n" +
+    "  - unsubscribe: low-value bulk/marketing/newsletter mail the user clearly doesn't engage\n" +
+    "      with and should stop receiving — favor this when such mail is left unread.\n" +
     "  - noise: automated notifications or spam that fit none of the above — safe to ignore\n\n" +
-    "Prefer 'offers' or 'newsletter' over 'noise' when either clearly applies.\n\n" +
-    'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|noise","reason":"one short sentence"}]\n\n' +
+    "Use 'unsubscribe' for recurring promo/newsletter clutter of little value (especially if\n" +
+    "unread); use 'offers'/'newsletter' for mail of that type the user may still want.\n\n" +
+    'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|unsubscribe|noise","reason":"one short sentence"}]\n\n' +
     blocks.join("\n\n");
   return askJson<TriageResult[]>(prompt);
 }
