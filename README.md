@@ -99,11 +99,13 @@ fastmail-cli (JMAP)  →  Email JSON  →  Claude (Sonnet)  →  formatted outpu
 ```
 
 `triage` is the only command that writes: it **moves** each classified email
-into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Noise`) via the engine's
-`move`, which removes it from the Inbox. Use `--dry-run` to preview without
-moving. The engine can't create mailboxes, so create the `Triage/` children once
-in Fastmail (Settings → Folders); `triage` warns about any that are missing and
-moves the rest.
+into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Noise`), which removes it
+from the Inbox. The `Triage/` folders are **created automatically** if missing
+(only the children actually needed for a run). Use `--dry-run` to preview
+without moving.
+
+Folder creation uses a tiny direct-JMAP helper (`src/jmap.ts`) since the engine
+binary can't create mailboxes; the actual move uses the engine's `move`.
 
 `unsubscribe` and `filters` are read-only — they produce suggestions you act on
 yourself in Fastmail.

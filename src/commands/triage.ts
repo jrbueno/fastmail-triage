@@ -1,7 +1,8 @@
 import pc from "picocolors";
-import { FastmailEngine, senderOf, type Mailbox } from "../fastmail.ts";
+import { FastmailEngine, senderOf } from "../fastmail.ts";
 import { triageEmails, type Category, type TriageResult } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
+import { JmapClient } from "../jmap.ts";
 import * as ui from "../ui.ts";
 
 interface Opts {
@@ -80,47 +81,30 @@ export async function triageCommand(opts: Opts): Promise<void> {
       continue;
     }
 
-    await applyMoves(engine, buckets);
+    await applyMoves(engine, account.token, buckets);
   }
 }
 
 async function applyMoves(
   engine: FastmailEngine,
+  token: string,
   buckets: Record<Category, TriageResult[]>,
 ): Promise<void> {
   const used = (Object.keys(buckets) as Category[]).filter((c) => buckets[c].length > 0);
   if (used.length === 0) return;
 
-  // The engine can't create mailboxes — verify the targets exist first.
-  const mailboxes = await engine.listMailboxes();
-  const parent = mailboxes.find((m) => m.name === PARENT_LABEL && !m.parentId);
-  const missing: string[] = [];
-  const targetByCat = new Map<Category, Mailbox>();
-
-  for (const cat of used) {
-    const leaf = MAILBOX_NAMES[cat];
-    // Prefer a child under the Triage parent; fall back to any mailbox with that name.
-    const box =
-      mailboxes.find((m) => m.name === leaf && parent && m.parentId === parent.id) ??
-      mailboxes.find((m) => m.name === leaf);
-    if (box) targetByCat.set(cat, box);
-    else missing.push(`${PARENT_LABEL}/${leaf}`);
-  }
-
-  if (missing.length > 0) {
-    ui.warn(
-      `\nMissing mailboxes (the engine can't create them):\n` +
-        missing.map((m) => `  • ${m}`).join("\n") +
-        `\n\nCreate them once in Fastmail (Settings → Folders, nested under "${PARENT_LABEL}"), then re-run.`,
-    );
+  // The engine can't create mailboxes, so use JMAP to auto-create the Triage
+  // tree (only the children we actually need), then move via the engine.
+  const childNames = used.map((c) => MAILBOX_NAMES[c]);
+  const created = await new JmapClient(token).ensureLabelTree(PARENT_LABEL, childNames);
+  if (created.length > 0) {
+    ui.info(pc.dim(`Created: ${created.join(", ")}`));
   }
 
   let moved = 0;
   for (const cat of used) {
-    const box = targetByCat.get(cat);
-    if (!box) continue;
     for (const item of buckets[cat]) {
-      await engine.moveEmail(item.id, box.name);
+      await engine.moveEmail(item.id, MAILBOX_NAMES[cat]);
       moved++;
     }
   }
