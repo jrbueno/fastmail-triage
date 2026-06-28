@@ -4,8 +4,8 @@ AI-powered Fastmail inbox assistant. Four commands:
 
 | Command | What it does |
 |---|---|
-| `triage` | Sorts mail into **Needs Reply / FYI / Offers / Newsletter / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
-| `unsubscribe` | Finds newsletters & promo senders cluttering your inbox so you can cut them in one pass. |
+| `triage` | Sorts mail into **Needs Reply / FYI / Offers / Newsletter / Unsubscribe / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
+| `unsubscribe` | Finds newsletters & promo senders and **actually unsubscribes** via `List-Unsubscribe` (one-click POST or mailto), with a human-in-the-loop review step. |
 | `find <query>` | Pulls a thread/topic (`"what did marketing say about the Q3 launch?"`) and summarizes it. |
 | `filters` | Suggests filter/label rules based on what's actually in your inbox. |
 
@@ -41,7 +41,9 @@ bun run src/cli.ts triage --oldest           # start with the oldest mail
 bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default: Inbox)
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --account all       # every configured account
-bun run src/cli.ts unsubscribe
+bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
+bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
+bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
 bun run src/cli.ts find "Q3 launch marketing" --after 2026-01-01
 bun run src/cli.ts filters --json            # machine-readable output
 ```
@@ -111,5 +113,18 @@ Fetching (with sort order + folder selection) and folder creation use a small
 direct-JMAP helper (`src/jmap.ts`), since the engine binary exposes neither;
 the actual move uses the engine's `move`.
 
-`unsubscribe` and `filters` are read-only — they produce suggestions you act on
-yourself in Fastmail.
+### Unsubscribe workflow (human-in-the-loop)
+
+`triage` can route low-value mail you don't engage with into `Triage/Unsubscribe`.
+Then:
+
+1. `unsubscribe` — preview candidates (in the Inbox it uses Claude to pick
+   newsletters/promo; a folder or `--sender` is taken as-is). Shows each sender's
+   method: **1-click (auto)**, **email (auto)**, **browser (manual)**, or **no method**.
+2. Review the list.
+3. `unsubscribe --mailbox Unsubscribe --apply` (or `--sender <email> --apply`) —
+   actually unsubscribes: HTTPS one-click POST (RFC 8058) or a `mailto:`
+   message via the engine. Browser-only links are reported, never auto-opened.
+
+`unsubscribe` only contacts senders when you pass `--apply`. `filters` is
+read-only — it produces suggestions you act on yourself in Fastmail.

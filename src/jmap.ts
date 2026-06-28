@@ -94,15 +94,22 @@ export class JmapClient {
    */
   async queryEmails(opts: {
     mailbox?: string;
+    from?: string;
     unread?: boolean;
     oldestFirst?: boolean;
     limit?: number;
   }): Promise<Email[]> {
     const accountId = await this.accountId();
     const mailboxes = await this.getMailboxes();
-    const box = this.resolveMailbox(mailboxes, opts.mailbox);
 
-    const filter: Record<string, unknown> = { inMailbox: box.id };
+    const filter: Record<string, unknown> = {};
+    // Default to Inbox unless an explicit folder, or a sender-wide search, is given.
+    if (opts.mailbox) {
+      filter.inMailbox = this.resolveMailbox(mailboxes, opts.mailbox).id;
+    } else if (!opts.from) {
+      filter.inMailbox = this.resolveMailbox(mailboxes, undefined).id;
+    }
+    if (opts.from) filter.from = opts.from;
     if (opts.unread) filter.notKeyword = "$seen";
 
     const res = await this.call([
@@ -127,6 +134,47 @@ export class JmapClient {
       ],
     ]);
     return res.methodResponses[1][1].list as Email[];
+  }
+
+  /**
+   * Fetch List-Unsubscribe info for the given emails (RFC 2369 / RFC 8058).
+   * `urls` are the parsed targets (mailto: and/or https:); `oneClick` is true
+   * when the sender supports RFC 8058 one-click POST unsubscribe.
+   */
+  async getUnsubscribeInfo(
+    ids: string[],
+  ): Promise<{ id: string; senderEmail: string; senderName: string; urls: string[]; oneClick: boolean }[]> {
+    if (ids.length === 0) return [];
+    const accountId = await this.accountId();
+    const res = await this.call([
+      [
+        "Email/get",
+        {
+          accountId,
+          ids,
+          properties: [
+            "id",
+            "from",
+            "header:List-Unsubscribe:asURLs",
+            "header:List-Unsubscribe-Post:asText",
+          ],
+        },
+        "0",
+      ],
+    ]);
+    const list = res.methodResponses[0][1].list as any[];
+    return list.map((e) => {
+      const from = e.from?.[0] ?? {};
+      const urls = (e["header:List-Unsubscribe:asURLs"] ?? []) as string[];
+      const post = (e["header:List-Unsubscribe-Post:asText"] ?? "") as string;
+      return {
+        id: e.id as string,
+        senderEmail: (from.email ?? "") as string,
+        senderName: (from.name ?? "") as string,
+        urls,
+        oneClick: /one-click/i.test(post),
+      };
+    });
   }
 
   private async createMailbox(name: string, parentId: string | null): Promise<string> {

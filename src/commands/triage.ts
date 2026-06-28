@@ -22,6 +22,7 @@ const MAILBOX_NAMES: Record<Category, string> = {
   fyi: "FYI",
   offers: "Offers",
   newsletter: "Newsletter",
+  unsubscribe: "Unsubscribe",
   noise: "Noise",
 };
 
@@ -31,6 +32,7 @@ const LABELS: Record<Category, string> = {
   fyi: "FYI",
   offers: "Offers",
   newsletter: "Newsletter",
+  unsubscribe: "Unsubscribe",
   noise: "Noise / Skip",
 };
 
@@ -39,6 +41,7 @@ const COLOR: Record<Category, (s: string) => string> = {
   fyi: (s) => pc.yellow(s),
   offers: (s) => pc.magenta(s),
   newsletter: (s) => pc.blue(s),
+  unsubscribe: (s) => pc.bold(pc.cyan(s)),
   noise: (s) => pc.dim(s),
 };
 
@@ -75,7 +78,7 @@ export async function triageCommand(opts: Opts): Promise<void> {
     }
 
     const buckets: Record<Category, TriageResult[]> = {
-      reply: [], fyi: [], offers: [], newsletter: [], noise: [],
+      reply: [], fyi: [], offers: [], newsletter: [], unsubscribe: [], noise: [],
     };
     for (const r of results) (buckets[r.category] ?? buckets.noise).push(r);
 
