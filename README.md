@@ -4,7 +4,7 @@ AI-powered Fastmail inbox assistant. Four commands:
 
 | Command | What it does |
 |---|---|
-| `triage` | Sorts unread/recent mail into **Needs Reply / FYI / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
+| `triage` | Sorts mail into **Needs Reply / FYI / Offers / Newsletter / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
 | `unsubscribe` | Finds newsletters & promo senders cluttering your inbox so you can cut them in one pass. |
 | `find <query>` | Pulls a thread/topic (`"what did marketing say about the Q3 launch?"`) and summarizes it. |
 | `filters` | Suggests filter/label rules based on what's actually in your inbox. |
@@ -37,6 +37,8 @@ bun run src/cli.ts account add personal
 ```bash
 bun run src/cli.ts triage                    # classify + file under Triage/
 bun run src/cli.ts triage --dry-run          # preview only, move nothing
+bun run src/cli.ts triage --oldest           # start with the oldest mail
+bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default: Inbox)
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts unsubscribe
@@ -99,13 +101,15 @@ fastmail-cli (JMAP)  →  Email JSON  →  Claude (Sonnet)  →  formatted outpu
 ```
 
 `triage` is the only command that writes: it **moves** each classified email
-into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Noise`), which removes it
-from the Inbox. The `Triage/` folders are **created automatically** if missing
-(only the children actually needed for a run). Use `--dry-run` to preview
-without moving.
+into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Offers`, `Newsletter`,
+`Noise`), which removes it from the source folder. The `Triage/` folders are
+**created automatically** if missing (only the children actually needed for a
+run). Use `--dry-run` to preview without moving, `--oldest` to process the
+oldest mail first, and `--mailbox <name>` to triage a folder other than Inbox.
 
-Folder creation uses a tiny direct-JMAP helper (`src/jmap.ts`) since the engine
-binary can't create mailboxes; the actual move uses the engine's `move`.
+Fetching (with sort order + folder selection) and folder creation use a small
+direct-JMAP helper (`src/jmap.ts`), since the engine binary exposes neither;
+the actual move uses the engine's `move`.
 
 `unsubscribe` and `filters` are read-only — they produce suggestions you act on
 yourself in Fastmail.

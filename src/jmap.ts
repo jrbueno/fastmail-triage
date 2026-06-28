@@ -6,6 +6,8 @@
  * its category children exist, creating any that are missing.
  */
 
+import type { Email } from "./fastmail.ts";
+
 const SESSION_URL =
   process.env.JMAP_SESSION_URL || "https://api.fastmail.com/.well-known/jmap";
 const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
@@ -69,6 +71,62 @@ export class JmapClient {
     const accountId = await this.accountId();
     const res = await this.call([["Mailbox/get", { accountId, ids: null }, "0"]]);
     return res.methodResponses[0][1].list as JmapMailbox[];
+  }
+
+  /** Resolve a mailbox by leaf name (case-insensitive) or role. */
+  private resolveMailbox(mailboxes: JmapMailbox[], selector?: string): JmapMailbox {
+    if (!selector) {
+      const inbox = mailboxes.find((m) => m.role === "inbox");
+      if (!inbox) throw new Error("No Inbox mailbox found.");
+      return inbox;
+    }
+    const lower = selector.toLowerCase();
+    const match =
+      mailboxes.find((m) => m.name.toLowerCase() === lower) ??
+      mailboxes.find((m) => m.role === lower);
+    if (!match) throw new Error(`Mailbox "${selector}" not found.`);
+    return match;
+  }
+
+  /**
+   * Query emails from a mailbox with full control over sort order, unread
+   * filtering, and limit — capabilities the engine binary doesn't expose.
+   */
+  async queryEmails(opts: {
+    mailbox?: string;
+    unread?: boolean;
+    oldestFirst?: boolean;
+    limit?: number;
+  }): Promise<Email[]> {
+    const accountId = await this.accountId();
+    const mailboxes = await this.getMailboxes();
+    const box = this.resolveMailbox(mailboxes, opts.mailbox);
+
+    const filter: Record<string, unknown> = { inMailbox: box.id };
+    if (opts.unread) filter.notKeyword = "$seen";
+
+    const res = await this.call([
+      [
+        "Email/query",
+        {
+          accountId,
+          filter,
+          sort: [{ property: "receivedAt", isAscending: Boolean(opts.oldestFirst) }],
+          limit: opts.limit ?? 50,
+        },
+        "q",
+      ],
+      [
+        "Email/get",
+        {
+          accountId,
+          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
+          properties: ["id", "subject", "from", "to", "receivedAt", "preview", "keywords"],
+        },
+        "g",
+      ],
+    ]);
+    return res.methodResponses[1][1].list as Email[];
   }
 
   private async createMailbox(name: string, parentId: string | null): Promise<string> {
