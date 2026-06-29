@@ -12,6 +12,7 @@ interface Opts {
   mailbox?: string;
   sender?: string;
   apply?: boolean;
+  then?: string;
   json?: boolean;
 }
 
@@ -94,10 +95,12 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     ui.info(pc.yellow(`\nUnsubscribing… (this contacts each sender)`));
     let ok = 0;
     let manual = 0;
+    const filedIds: string[] = []; // messages from senders that unsubscribed OK
     for (const sender of senders) {
       const result = await executeUnsub(sender, engine);
       if (result.ok) {
         ok++;
+        filedIds.push(...sender.ids);
         ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
       } else if (sender.method === "manual") {
         manual++;
@@ -110,5 +113,11 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
       `\nDone: ${pc.green(`${ok} unsubscribed`)}, ${manual} need a browser, ` +
         `${senders.length - ok - manual} failed/unsupported.`,
     );
+
+    // --then: file the existing mail of senders that successfully unsubscribed.
+    if (opts.then && filedIds.length > 0) {
+      const moved = await jmap.moveEmailsTo(filedIds, opts.then);
+      ui.info(pc.green(`Moved ${moved} message${moved === 1 ? "" : "s"} to "${opts.then}".`));
+    }
   }
 }

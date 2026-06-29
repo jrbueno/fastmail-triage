@@ -47,6 +47,7 @@ bun run src/cli.ts triage --all --limit 100000 --batch 40
 bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
+bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --then trash  # unsub + bin their mail
 bun run src/cli.ts find "Q3 launch marketing" --after 2026-01-01
 bun run src/cli.ts filters --json            # machine-readable output
 ```
@@ -136,6 +137,10 @@ Then:
 3. `unsubscribe --mailbox Unsubscribe --apply` (or `--sender <email> --apply`) —
    actually unsubscribes: HTTPS one-click POST (RFC 8058) or a `mailto:`
    message via the engine. Browser-only links are reported, never auto-opened.
+   One request **per unique sender**, not per email.
+4. Optionally add `--then trash` / `--then archive` / `--then <folder>` to file
+   the existing mail of senders that unsubscribed **successfully** (failed or
+   browser-only senders are left untouched).
 
 `unsubscribe` only contacts senders when you pass `--apply`. `filters` is
 read-only — it produces suggestions you act on yourself in Fastmail.

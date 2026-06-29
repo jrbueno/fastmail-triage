@@ -43,6 +43,7 @@ program
   .option("-m, --mailbox <name>", "scan a reviewed folder (e.g. Triage/Unsubscribe leaf 'Unsubscribe'); every sender is a target")
   .option("-s, --sender <email>", "target a single sender")
   .option("--apply", "actually unsubscribe (default: preview only)", false)
+  .option("--then <dest>", "after a successful unsubscribe, move that sender's mail (archive | trash | <folder>)")
   .option("--json", "output raw JSON", false)
   .action((opts) => run(() => unsubscribeCommand(opts)));
 
