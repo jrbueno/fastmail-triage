@@ -48,6 +48,7 @@ bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --then trash  # unsub + bin their mail
+bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --skip-no-header  # only senders with a List-Unsubscribe header
 bun run src/cli.ts find "Q3 launch marketing" --after 2026-01-01
 bun run src/cli.ts filters --json            # machine-readable output
 ```
@@ -165,6 +166,8 @@ Then:
 1. `unsubscribe` — preview candidates (in the Inbox it uses Claude to pick
    newsletters/promo; a folder or `--sender` is taken as-is). Shows each sender's
    method: **1-click (auto)**, **email (auto)**, **browser (manual)**, or **no method**.
+   Add `--skip-no-header` to drop senders with no `List-Unsubscribe` header so the
+   run only handles ones that can actually be unsubscribed.
 2. Review the list.
 3. `unsubscribe --mailbox Unsubscribe --apply` (or `--sender <email> --apply`) —
    actually unsubscribes: HTTPS one-click POST (RFC 8058) or a `mailto:`

@@ -44,6 +44,7 @@ program
   .option("-s, --sender <email>", "target a single sender")
   .option("--apply", "actually unsubscribe (default: preview only)", false)
   .option("--then <dest>", "after a successful unsubscribe, move that sender's mail (archive | trash | <folder>)")
+  .option("--skip-no-header", "ignore senders with no List-Unsubscribe header", false)
   .option("--json", "output raw JSON", false)
   .action((opts) => run(() => unsubscribeCommand(opts)));
 

@@ -14,6 +14,7 @@ interface Opts {
   sender?: string;
   apply?: boolean;
   then?: string;
+  skipNoHeader?: boolean;
   json?: boolean;
 }
 
@@ -64,8 +65,22 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     // Look up the List-Unsubscribe method for each, grouped per sender.
     ui.info("Reading List-Unsubscribe headers…");
     const infos = await jmap.getUnsubscribeInfo(emails.map((e) => e.id));
-    const senders = groupBySender(infos);
+    let senders = groupBySender(infos);
     const store = new UnsubStore(account.name);
+
+    // Optionally drop senders with no List-Unsubscribe header so the run
+    // focuses on the ones that can actually be unsubscribed.
+    if (opts.skipNoHeader) {
+      const before = senders.length;
+      senders = senders.filter((s) => s.method !== "none");
+      const dropped = before - senders.length;
+      if (dropped > 0) ui.info(pc.dim(`Skipping ${dropped} sender(s) with no List-Unsubscribe header.`));
+    }
+
+    if (senders.length === 0) {
+      ui.info("No senders to process.");
+      continue;
+    }
 
     if (opts.json) {
       const annotated = senders.map((s) => ({ ...s, alreadyUnsubscribed: store.has(s.senderEmail) }));
