@@ -174,5 +174,12 @@ Then:
    the existing mail of senders that unsubscribed **successfully** (failed or
    browser-only senders are left untouched).
 
+Successful unsubscribes are **remembered** per account (in
+`$FASTMAIL_TRIAGE_HOME/unsubscribed.json`). On later runs those senders are
+**not contacted again** — they're marked `Prev ✓` in the preview, and under
+`--apply` they're skipped but their new mail is still filed via `--then`. So a
+recurring `unsubscribe --mailbox Unsubscribe --apply --then trash` keeps binning
+a known sender's mail without re-sending unsubscribe requests.
+
 `unsubscribe` only contacts senders when you pass `--apply`. `filters` is
 read-only — it produces suggestions you act on yourself in Fastmail.

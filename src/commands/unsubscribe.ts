@@ -4,6 +4,7 @@ import { findUnsubscribeCandidates } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
 import { JmapClient } from "../jmap.ts";
 import { groupBySender, executeUnsub, type Method } from "../unsub.ts";
+import { UnsubStore } from "../unsubstore.ts";
 import * as ui from "../ui.ts";
 
 interface Opts {
@@ -64,42 +65,59 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     ui.info("Reading List-Unsubscribe headers…");
     const infos = await jmap.getUnsubscribeInfo(emails.map((e) => e.id));
     const senders = groupBySender(infos);
+    const store = new UnsubStore(account.name);
 
     if (opts.json) {
-      console.log(JSON.stringify(senders, null, 2));
+      const annotated = senders.map((s) => ({ ...s, alreadyUnsubscribed: store.has(s.senderEmail) }));
+      console.log(JSON.stringify(annotated, null, 2));
       continue;
     }
 
     ui.header(`Unsubscribe Candidates (${senders.length} senders)`);
     ui.table({
-      head: ["Sender", "Email", "#", "Method"],
-      colWidths: [24, 32, 5, 18],
+      head: ["Sender", "Email", "#", "Method", "Prev?"],
+      colWidths: [22, 30, 5, 18, 7],
       rows: senders.map((s) => [
         s.senderName || "",
         s.senderEmail,
         String(s.count),
         METHOD_LABEL[s.method],
+        store.has(s.senderEmail) ? "✓" : "",
       ]),
     });
 
     if (!opts.apply) {
-      const auto = senders.filter((s) => s.method === "one-click" || s.method === "email").length;
+      const todo = senders.filter(
+        (s) => !store.has(s.senderEmail) && (s.method === "one-click" || s.method === "email"),
+      ).length;
+      const known = senders.filter((s) => store.has(s.senderEmail)).length;
       ui.info(
-        `\n${auto} of ${senders.length} can be unsubscribed automatically. ` +
-          `Review the list, then re-run with ${pc.bold("--apply")} to unsubscribe.`,
+        `\n${todo} new senders can be unsubscribed automatically` +
+          (known ? `; ${known} already unsubscribed (Prev ✓) will just be filed` : "") +
+          `. Re-run with ${pc.bold("--apply")} to act.`,
       );
       continue;
     }
 
-    // --apply: actually unsubscribe.
-    ui.info(pc.yellow(`\nUnsubscribing… (this contacts each sender)`));
+    // --apply: unsubscribe new senders; skip ones already done in a prior run.
+    ui.info(pc.yellow(`\nUnsubscribing… (this contacts each new sender)`));
     let ok = 0;
+    let skipped = 0;
     let manual = 0;
-    const filedIds: string[] = []; // messages from senders that unsubscribed OK
+    const filedIds: string[] = []; // messages to file via --then
+
     for (const sender of senders) {
+      if (store.has(sender.senderEmail)) {
+        // Already unsubscribed in a previous run — don't contact again, just file.
+        skipped++;
+        filedIds.push(...sender.ids);
+        ui.info(pc.dim(`  • ${sender.senderEmail} — already unsubscribed, skipping`));
+        continue;
+      }
       const result = await executeUnsub(sender, engine);
       if (result.ok) {
         ok++;
+        store.record(sender.senderEmail);
         filedIds.push(...sender.ids);
         ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
       } else if (sender.method === "manual") {
@@ -110,11 +128,11 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
       }
     }
     ui.info(
-      `\nDone: ${pc.green(`${ok} unsubscribed`)}, ${manual} need a browser, ` +
-        `${senders.length - ok - manual} failed/unsupported.`,
+      `\nDone: ${pc.green(`${ok} unsubscribed`)}, ${skipped} already-done, ` +
+        `${manual} need a browser, ${senders.length - ok - skipped - manual} failed/unsupported.`,
     );
 
-    // --then: file the existing mail of senders that successfully unsubscribed.
+    // --then: file the existing mail of senders that are unsubscribed (new + prior).
     if (opts.then && filedIds.length > 0) {
       const moved = await jmap.moveEmailsTo(filedIds, opts.then);
       ui.info(pc.green(`Moved ${moved} message${moved === 1 ? "" : "s"} to "${opts.then}".`));
