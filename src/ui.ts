@@ -13,8 +13,9 @@ export function accountBanner(name: string): void {
   console.log(pc.dim("─".repeat(60)));
 }
 
+// Progress/status goes to stderr so stdout stays clean for `--json | jq`.
 export function info(text: string): void {
-  console.log(pc.dim(text));
+  console.error(pc.dim(text));
 }
 
 export function warn(text: string): void {
