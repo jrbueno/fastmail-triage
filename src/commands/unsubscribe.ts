@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import { FastmailEngine, senderOf } from "../fastmail.ts";
+import { FastmailEngine, senderOf, type Email } from "../fastmail.ts";
 import { findUnsubscribeCandidates } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
 import { JmapClient } from "../jmap.ts";
@@ -10,12 +10,35 @@ import * as ui from "../ui.ts";
 interface Opts {
   account?: string;
   limit: number;
+  all?: boolean;
   mailbox?: string;
   sender?: string;
   apply?: boolean;
   then?: string;
   skipNoHeader?: boolean;
   json?: boolean;
+}
+
+/** Fetch emails for the scope: a single page (--limit), or all of them (--all). */
+async function fetchEmails(jmap: JmapClient, opts: Opts): Promise<Email[]> {
+  const page = opts.limit || 100;
+  if (!opts.all) {
+    return jmap.queryEmails({ mailbox: opts.mailbox, from: opts.sender, limit: page });
+  }
+  const out: Email[] = [];
+  let offset = 0;
+  while (out.length < 10000) {
+    const batch = await jmap.queryEmails({
+      mailbox: opts.mailbox,
+      from: opts.sender,
+      limit: page,
+      offset,
+    });
+    out.push(...batch);
+    if (batch.length < page) break;
+    offset += batch.length;
+  }
+  return out;
 }
 
 const METHOD_LABEL: Record<Method, string> = {
@@ -37,12 +60,8 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     const where = opts.sender
       ? `sender ${opts.sender}`
       : (opts.mailbox ?? "Inbox");
-    ui.info(`Scanning ${where}…`);
-    let emails = await jmap.queryEmails({
-      mailbox: opts.mailbox,
-      from: opts.sender,
-      limit: opts.limit,
-    });
+    ui.info(`Scanning ${where}${opts.all ? " (all)" : ""}…`);
+    let emails = await fetchEmails(jmap, opts);
     if (emails.length === 0) {
       ui.info("No emails found.");
       continue;
@@ -62,9 +81,14 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
       continue;
     }
 
-    // Look up the List-Unsubscribe method for each, grouped per sender.
+    // Look up the List-Unsubscribe method for each, grouped per sender
+    // (chunked so a large folder doesn't build one oversized JMAP request).
     ui.info("Reading List-Unsubscribe headers…");
-    const infos = await jmap.getUnsubscribeInfo(emails.map((e) => e.id));
+    const ids = emails.map((e) => e.id);
+    const infos = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      infos.push(...(await jmap.getUnsubscribeInfo(ids.slice(i, i + 200))));
+    }
     let senders = groupBySender(infos);
     const store = new UnsubStore(account.name);
 
