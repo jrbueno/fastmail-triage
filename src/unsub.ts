@@ -16,11 +16,13 @@ export interface SenderUnsub {
   senderEmail: string;
   senderName: string;
   count: number; // how many messages from this sender in the batch
+  ids: string[]; // the message ids from this sender in the batch
   method: Method;
   target: string; // URL or mailto used for the method
 }
 
 interface RawInfo {
+  id: string;
   senderEmail: string;
   senderName: string;
   urls: string[];
@@ -46,6 +48,7 @@ export function groupBySender(infos: RawInfo[]): SenderUnsub[] {
     const existing = bySender.get(key);
     if (existing) {
       existing.count++;
+      existing.ids.push(info.id);
       // Upgrade to the most automatable method we've seen for this sender.
       if (rank(method) > rank(existing.method)) {
         existing.method = method;
@@ -56,6 +59,7 @@ export function groupBySender(infos: RawInfo[]): SenderUnsub[] {
         senderEmail: info.senderEmail,
         senderName: info.senderName,
         count: 1,
+        ids: [info.id],
         method,
         target,
       });

@@ -227,6 +227,17 @@ export class JmapClient {
   }
 
   /**
+   * Move emails into a mailbox resolved by name or role (e.g. "archive",
+   * "trash", or a folder name). Returns the number moved.
+   */
+  async moveEmailsTo(ids: string[], selector: string): Promise<number> {
+    if (ids.length === 0) return 0;
+    const mailboxes = await this.getMailboxes();
+    const box = this.resolveMailbox(mailboxes, selector);
+    return this.moveEmails(ids, box.id);
+  }
+
+  /**
    * Move many emails into a single mailbox at once (replaces mailbox
    * membership, so they leave the Inbox). Returns the number moved.
    */
