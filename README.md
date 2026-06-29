@@ -98,6 +98,13 @@ Env vars (or `.env`):
 - `FASTMAIL_TRIAGE_MODEL` — Claude model (default `claude-sonnet-4-6`).
 - `FASTMAIL_CLI_BIN` — path to the engine if not on `PATH`.
 - `FASTMAIL_TRIAGE_HOME` — config/token storage dir (default `~/.config/fastmail-triage`).
+- `FASTMAIL_TRIAGE_DEBUG=1` — log Claude prompt-cache usage (write/read/uncached tokens).
+
+**Prompt caching.** Each task's stable instructions live in a cached `system`
+prompt (`cache_control: ephemeral`); the per-request email data goes in the user
+message. The triage rubric includes worked few-shot examples, which both sharpen
+classification and push the cached prefix over the model's minimum — so across a
+large batched run the prefix is served from cache at ~0.1x input cost.
 
 ## How it works
 

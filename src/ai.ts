@@ -114,6 +114,49 @@ const TRIAGE_SYSTEM =
   "  - noise: automated notifications or spam that fit none of the above — safe to ignore\n\n" +
   "Use 'unsubscribe' for recurring promo/newsletter clutter of little value (especially if\n" +
   "unread); use 'offers'/'newsletter' for mail of that type the user may still want.\n\n" +
+  "Decision guidance for the tricky boundaries:\n" +
+  "  • reply vs fyi: choose 'reply' only when a specific human is waiting on an answer,\n" +
+  "    decision, or action FROM the user (a direct question, a meeting request needing a\n" +
+  "    yes/no, a document to approve). Automated 'do not reply' mail is never 'reply'.\n" +
+  "  • fyi vs noise: 'fyi' is mail the user would want to have seen even if no action is\n" +
+  "    needed — receipts, shipping/delivery updates, security alerts, bills, calendar\n" +
+  "    invites, statements, personal-but-informational notes. 'noise' is automated chatter\n" +
+  "    with no lasting value (social pings, 'someone viewed your profile', app nudges).\n" +
+  "  • offers vs newsletter: 'offers' pushes a sale/discount/coupon/limited-time deal.\n" +
+  "    'newsletter' delivers editorial or digest content (articles, roundups, product\n" +
+  "    updates) even if it ends with a small promo. Judge by the email's primary purpose.\n" +
+  "  • unsubscribe vs offers/newsletter: pick 'unsubscribe' for low-value bulk mail the\n" +
+  "    user is clearly not engaging with — strong signals are an UNREAD status combined\n" +
+  "    with generic mass-marketing from a sender they have no relationship with. If the\n" +
+  "    promo/newsletter is from a brand or publication the user plausibly cares about, or\n" +
+  "    it's already been read, prefer 'offers'/'newsletter' over 'unsubscribe'.\n\n" +
+  "Worked examples (From / Subject / Status -> category: reason):\n" +
+  "  • Maria Chen <maria@acme.com> / 'Can you review the Q3 deck before Thursday?' / unread\n" +
+  "      -> reply: a colleague is directly asking the user to review and respond by a date.\n" +
+  "  • Calendar <invite@calendar.com> / 'Invitation: Design sync @ Fri 2pm' / unread\n" +
+  "      -> reply: a meeting invite awaiting the user's accept/decline.\n" +
+  "  • Amazon <ship@amazon.com> / 'Your package has shipped' / unread\n" +
+  "      -> fyi: a delivery update worth seeing but needing no response.\n" +
+  "  • Chase <alerts@chase.com> / 'Your statement is ready' / read\n" +
+  "      -> fyi: a financial statement notification, informational and worth keeping.\n" +
+  "  • Google <no-reply@accounts.google.com> / 'Security alert: new sign-in' / unread\n" +
+  "      -> fyi: a security notice the user should be aware of, no reply expected.\n" +
+  "  • LinkedIn <notify@linkedin.com> / 'You appeared in 9 searches this week' / unread\n" +
+  "      -> noise: a low-value engagement nudge with nothing actionable or lasting.\n" +
+  "  • Nextdoor <digest@nextdoor.com> / 'New replies in your neighborhood' / unread\n" +
+  "      -> noise: automated social chatter with no lasting value.\n" +
+  "  • Pottery Barn <sale@potterybarn.com> / 'Final hours: 50% off bedding' / unread\n" +
+  "      -> offers: a limited-time discount push from a retailer.\n" +
+  "  • REI <news@rei.com> / 'Member deals + trail tips for spring' / read\n" +
+  "      -> offers: the primary purpose is the member discount, and it has been read.\n" +
+  "  • Stratechery <ben@stratechery.com> / 'The Weekly Article: Platform shifts' / read\n" +
+  "      -> newsletter: editorial content the user subscribed to and is reading.\n" +
+  "  • GitHub <noreply@github.com> / 'Your weekly digest of repository activity' / unread\n" +
+  "      -> newsletter: a recurring digest, informational rather than a sale.\n" +
+  "  • RandomBoutique <promo@shopxyz.com> / 'Dear friend, 70% off everything!!!' / unread\n" +
+  "      -> unsubscribe: generic mass-marketing from an unfamiliar sender, left unread.\n" +
+  "  • DealsDaily <blast@dealsdaily.net> / 'You won't believe these prices' / unread\n" +
+  "      -> unsubscribe: recurring low-value promotional blast the user isn't opening.\n\n" +
   'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|unsubscribe|noise","reason":"one short sentence"}]';
 
 export async function triageEmails(emails: Email[]): Promise<TriageResult[]> {
