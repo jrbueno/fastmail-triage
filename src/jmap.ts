@@ -98,6 +98,7 @@ export class JmapClient {
     unread?: boolean;
     oldestFirst?: boolean;
     limit?: number;
+    offset?: number;
   }): Promise<Email[]> {
     const accountId = await this.accountId();
     const mailboxes = await this.getMailboxes();
@@ -119,6 +120,7 @@ export class JmapClient {
           accountId,
           filter,
           sort: [{ property: "receivedAt", isAscending: Boolean(opts.oldestFirst) }],
+          position: opts.offset ?? 0,
           limit: opts.limit ?? 50,
         },
         "q",
@@ -192,9 +194,13 @@ export class JmapClient {
 
   /**
    * Ensure a parent mailbox and the given child mailboxes exist, creating any
-   * that are missing. Returns the names of mailboxes that were newly created.
+   * that are missing. Returns each child name mapped to its mailbox id, plus
+   * the list of mailboxes that were newly created.
    */
-  async ensureLabelTree(parentName: string, childNames: string[]): Promise<string[]> {
+  async ensureLabelTree(
+    parentName: string,
+    childNames: string[],
+  ): Promise<{ ids: Record<string, string>; created: string[] }> {
     const existing = await this.getMailboxes();
     const created: string[] = [];
 
@@ -207,13 +213,34 @@ export class JmapClient {
       created.push(parentName);
     }
 
+    const ids: Record<string, string> = {};
     for (const name of childNames) {
       const child = existing.find((m) => m.name === name && m.parentId === parentId);
-      if (!child) {
-        await this.createMailbox(name, parentId);
+      if (child) {
+        ids[name] = child.id;
+      } else {
+        ids[name] = await this.createMailbox(name, parentId);
         created.push(`${parentName}/${name}`);
       }
     }
-    return created;
+    return { ids, created };
+  }
+
+  /**
+   * Move many emails into a single mailbox at once (replaces mailbox
+   * membership, so they leave the Inbox). Returns the number moved.
+   */
+  async moveEmails(ids: string[], mailboxId: string): Promise<number> {
+    if (ids.length === 0) return 0;
+    const accountId = await this.accountId();
+    const update: Record<string, unknown> = {};
+    for (const id of ids) update[id] = { mailboxIds: { [mailboxId]: true } };
+
+    const res = await this.call([["Email/set", { accountId, update }, "0"]]);
+    const notUpdated = res.methodResponses[0][1].notUpdated;
+    if (notUpdated && Object.keys(notUpdated).length > 0) {
+      throw new Error(`Some emails could not be moved: ${JSON.stringify(notUpdated)}`);
+    }
+    return Object.keys(res.methodResponses[0][1].updated ?? {}).length;
   }
 }

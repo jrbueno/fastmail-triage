@@ -27,6 +27,7 @@ program
   .description("Sort mail into reply / fyi / offers / newsletter / noise and file it under Triage/")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
+  .option("-b, --batch <n>", "emails per Claude call (1-100)", (v) => parseInt(v, 10), 40)
   .option("-m, --mailbox <name>", "folder to triage (default: Inbox)")
   .option("--oldest", "start with the oldest emails instead of newest", false)
   .option("--all", "include read mail, not just unread", false)

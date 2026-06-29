@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import { FastmailEngine, senderOf } from "../fastmail.ts";
+import { senderOf } from "../fastmail.ts";
 import { triageEmails, CATEGORIES, type Category, type TriageResult } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
 import { JmapClient } from "../jmap.ts";
@@ -8,6 +8,7 @@ import * as ui from "../ui.ts";
 interface Opts {
   account?: string;
   limit: number;
+  batch: number;
   all?: boolean;
   mailbox?: string;
   oldest?: boolean;
@@ -26,7 +27,6 @@ const MAILBOX_NAMES: Record<Category, string> = {
   noise: "Noise",
 };
 
-// Display headers for each bucket.
 const LABELS: Record<Category, string> = {
   reply: "Needs Reply",
   fyi: "FYI",
@@ -45,92 +45,155 @@ const COLOR: Record<Category, (s: string) => string> = {
   noise: (s) => pc.dim(s),
 };
 
+function emptyTotals(): Record<Category, number> {
+  return { reply: 0, fyi: 0, offers: 0, newsletter: 0, unsubscribe: 0, noise: 0 };
+}
+
 export async function triageCommand(opts: Opts): Promise<void> {
   const accounts = resolveAccounts(opts.account);
+  const batchSize = Math.max(1, Math.min(opts.batch, 100));
 
   for (const account of accounts) {
     if (accounts.length > 1) ui.accountBanner(account.name);
-    const engine = new FastmailEngine(account);
     const jmap = new JmapClient(account.token);
 
     const where = opts.mailbox ?? "Inbox";
     const order = opts.oldest ? "oldest first" : "newest first";
-    ui.info(`Fetching emails from ${where} (${order})…`);
+
+    if (opts.dryRun || opts.json) {
+      await previewMode(jmap, opts, batchSize, where, order);
+    } else {
+      await applyMode(jmap, opts, batchSize, where, order);
+    }
+  }
+}
+
+/** Read-only: paginate through up to --limit emails and show/emit the plan. */
+async function previewMode(
+  jmap: JmapClient,
+  opts: Opts,
+  batchSize: number,
+  where: string,
+  order: string,
+): Promise<void> {
+  ui.info(`Previewing up to ${opts.limit} emails from ${where} (${order})…`);
+  const all: (TriageResult & { sender: string; subject: string })[] = [];
+  const totals = emptyTotals();
+
+  let offset = 0;
+  while (all.length < opts.limit) {
+    const want = Math.min(batchSize, opts.limit - all.length);
     const emails = await jmap.queryEmails({
       mailbox: opts.mailbox,
       unread: !opts.all,
       oldestFirst: opts.oldest,
-      limit: opts.limit,
+      limit: want,
+      offset,
     });
-    if (emails.length === 0) {
-      ui.info("No emails found.");
-      continue;
-    }
+    if (emails.length === 0) break;
+    offset += emails.length;
 
-    ui.info(`Triaging ${emails.length} emails with Claude…`);
     const results = await triageEmails(emails);
     const byId = new Map(emails.map((e) => [e.id, e]));
-
-    if (opts.json) {
-      const enriched = results.map((r) => ({ ...r, account: account.name }));
-      console.log(JSON.stringify(enriched, null, 2));
-      continue;
+    for (const r of results) {
+      const e = byId.get(r.id);
+      const s = e ? senderOf(e) : { name: "?", email: "" };
+      totals[r.category] = (totals[r.category] ?? 0) + 1;
+      all.push({ ...r, sender: s.name || s.email || "?", subject: e?.subject ?? "?" });
     }
-
-    const buckets: Record<Category, TriageResult[]> = {
-      reply: [], fyi: [], offers: [], newsletter: [], unsubscribe: [], noise: [],
-    };
-    for (const r of results) (buckets[r.category] ?? buckets.noise).push(r);
-
-    for (const cat of CATEGORIES) {
-      const items = buckets[cat];
-      if (items.length === 0) continue;
-      ui.header(COLOR[cat](`${LABELS[cat]} (${items.length})`));
-      ui.table({
-        head: ["From", "Subject", "Why"],
-        colWidths: [26, 44, 40],
-        rows: items.map((r) => {
-          const e = byId.get(r.id);
-          const s = e ? senderOf(e) : { name: "?", email: "" };
-          return [s.name || s.email || "?", e?.subject ?? "?", r.reason];
-        }),
-      });
-    }
-
-    if (opts.dryRun) {
-      ui.info(`\nDry run — nothing moved. Re-run without --dry-run to file mail under "${PARENT_LABEL}/".`);
-      continue;
-    }
-
-    await applyMoves(engine, jmap, buckets);
+    if (!opts.json) ui.info(pc.dim(`  …classified ${all.length}`));
   }
+
+  if (opts.json) {
+    console.log(JSON.stringify(all, null, 2));
+    return;
+  }
+
+  for (const cat of CATEGORIES) {
+    const items = all.filter((r) => r.category === cat);
+    if (items.length === 0) continue;
+    ui.header(COLOR[cat](`${LABELS[cat]} (${items.length})`));
+    ui.table({
+      head: ["From", "Subject", "Why"],
+      colWidths: [26, 44, 40],
+      rows: items.map((r) => [r.sender, r.subject, r.reason]),
+    });
+  }
+  ui.info(`\nDry run — nothing moved. ${summary(totals)}`);
 }
 
-async function applyMoves(
-  engine: FastmailEngine,
+/** Drain the mailbox in batches, classifying then bulk-moving each batch. */
+async function applyMode(
   jmap: JmapClient,
-  buckets: Record<Category, TriageResult[]>,
+  opts: Opts,
+  batchSize: number,
+  where: string,
+  order: string,
 ): Promise<void> {
-  const used = CATEGORIES.filter((c) => buckets[c].length > 0);
-  if (used.length === 0) return;
+  ui.info(`Triaging up to ${opts.limit} emails from ${where} (${order})…`);
 
-  // The engine can't create mailboxes, so use JMAP to auto-create the Triage
-  // tree (only the children we actually need), then move via the engine.
-  const childNames = used.map((c) => MAILBOX_NAMES[c]);
-  const created = await jmap.ensureLabelTree(PARENT_LABEL, childNames);
-  if (created.length > 0) {
-    ui.info(pc.dim(`Created: ${created.join(", ")}`));
-  }
+  // Create the full Triage tree once up front and cache the mailbox ids.
+  const { ids: labelIds, created } = await jmap.ensureLabelTree(
+    PARENT_LABEL,
+    CATEGORIES.map((c) => MAILBOX_NAMES[c]),
+  );
+  if (created.length > 0) ui.info(pc.dim(`Created: ${created.join(", ")}`));
 
-  let moved = 0;
-  for (const cat of used) {
-    for (const item of buckets[cat]) {
-      await engine.moveEmail(item.id, MAILBOX_NAMES[cat]);
-      moved++;
+  const totals = emptyTotals();
+  const seen = new Set<string>();
+  let processed = 0;
+  let batchNo = 0;
+
+  while (processed < opts.limit) {
+    const want = Math.min(batchSize, opts.limit - processed);
+    const fetched = await jmap.queryEmails({
+      mailbox: opts.mailbox,
+      unread: !opts.all,
+      oldestFirst: opts.oldest,
+      limit: want,
+    });
+    // Skip anything we've already handled this run (e.g. a move that didn't
+    // clear the filter) to guarantee forward progress.
+    const emails = fetched.filter((e) => !seen.has(e.id));
+    if (emails.length === 0) break;
+
+    batchNo++;
+    const results = await triageEmails(emails);
+    const valid = new Set(emails.map((e) => e.id));
+
+    // Group ids by destination category.
+    const byCat: Record<Category, string[]> = {
+      reply: [], fyi: [], offers: [], newsletter: [], unsubscribe: [], noise: [],
+    };
+    for (const r of results) {
+      if (!valid.has(r.id)) continue;
+      (byCat[r.category] ?? byCat.noise).push(r.id);
     }
+
+    let movedThisBatch = 0;
+    for (const cat of CATEGORIES) {
+      const ids = byCat[cat];
+      if (ids.length === 0) continue;
+      const moved = await jmap.moveEmails(ids, labelIds[MAILBOX_NAMES[cat]]!);
+      totals[cat] += moved;
+      movedThisBatch += moved;
+    }
+
+    for (const e of emails) seen.add(e.id);
+    processed += emails.length;
+    ui.info(
+      pc.dim(`  batch ${batchNo}: classified ${emails.length}, moved ${movedThisBatch} ` +
+        `(total ${processed})`),
+    );
+    if (movedThisBatch === 0) break; // nothing is leaving the mailbox; avoid looping
   }
 
-  if (moved > 0) {
-    ui.info(pc.green(`\n✓ Moved ${moved} email${moved === 1 ? "" : "s"} into "${PARENT_LABEL}/".`));
-  }
+  ui.info(pc.green(`\n✓ Filed ${processed} emails under "${PARENT_LABEL}/". ${summary(totals)}`));
+}
+
+function summary(totals: Record<Category, number>): string {
+  const parts = CATEGORIES.filter((c) => totals[c] > 0).map(
+    (c) => `${LABELS[c].replace(" / Skip", "")}: ${totals[c]}`,
+  );
+  return parts.length ? `(${parts.join(", ")})` : "";
 }

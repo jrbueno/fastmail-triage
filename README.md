@@ -41,6 +41,9 @@ bun run src/cli.ts triage --oldest           # start with the oldest mail
 bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default: Inbox)
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --account all       # every configured account
+
+# Clean out a huge inbox (read + unread), 40 per Claude call:
+bun run src/cli.ts triage --all --limit 100000 --batch 40
 bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
@@ -109,9 +112,17 @@ into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Offers`, `Newsletter`,
 run). Use `--dry-run` to preview without moving, `--oldest` to process the
 oldest mail first, and `--mailbox <name>` to triage a folder other than Inbox.
 
-Fetching (with sort order + folder selection) and folder creation use a small
-direct-JMAP helper (`src/jmap.ts`), since the engine binary exposes neither;
-the actual move uses the engine's `move`.
+**Scale.** `triage` processes mail in batches (`--batch`, default 40) — each
+batch is one Claude call, then a single bulk JMAP move per category. It loops,
+draining the mailbox until `--limit` is reached or nothing is left, so it
+handles very large inboxes (tens of thousands). Because filed mail leaves the
+source folder, you can stop (Ctrl-C) and resume anytime — re-running just
+continues with what's left.
+
+Fetching (sort order, folder selection, pagination), folder creation, and the
+bulk moves all use a small direct-JMAP helper (`src/jmap.ts`), since the engine
+binary exposes none of these. The engine is still used by `find` and by
+`unsubscribe` (mailto: sends).
 
 ### Unsubscribe workflow (human-in-the-loop)
 

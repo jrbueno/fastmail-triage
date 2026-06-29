@@ -105,7 +105,8 @@ export async function triageEmails(emails: Email[]): Promise<TriageResult[]> {
     "unread); use 'offers'/'newsletter' for mail of that type the user may still want.\n\n" +
     'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|unsubscribe|noise","reason":"one short sentence"}]\n\n' +
     blocks.join("\n\n");
-  return askJson<TriageResult[]>(prompt);
+  // Sized for a batch of ~50 short result objects with headroom.
+  return askJson<TriageResult[]>(prompt, 8192);
 }
 
 // ── Unsubscribe sweep ───────────────────────────────────────────────────────
