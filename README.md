@@ -80,6 +80,31 @@ docker compose run --rm cli unsubscribe --account work
 With `FASTMAIL_ACCOUNTS` / `FASTMAIL_TOKEN` set in `.env`, accounts are picked up
 automatically — no `account add` step needed inside the container.
 
+### Audit accuracy before a full sweep
+
+`triage --json` prints one reviewable object per email — `{id, category, reason,
+sender, subject}` — to stdout (progress goes to stderr, so it pipes cleanly into
+`jq`). Sample a few hundred and eyeball the result before committing to a 98k run:
+
+```bash
+# Capture a sample (newest 300 unread), nothing is moved
+bun run src/cli.ts triage --limit 300 --json > sample.json
+
+# Category breakdown
+jq -r 'group_by(.category)[] | "\(.[0].category): \(length)"' sample.json
+
+# Spot-check one category — are these really "unsubscribe"?
+jq -r '.[] | select(.category=="unsubscribe") | "\(.sender) — \(.subject)"' sample.json
+
+# Find anything filed as reply/fyi to make sure nothing important is buried
+jq -r '.[] | select(.category=="reply" or .category=="fyi")
+        | "[\(.category)] \(.sender) — \(.subject)"' sample.json
+```
+
+If a sender is consistently miscategorized, add or tweak a worked example in
+`TRIAGE_SYSTEM` in [src/ai.ts](src/ai.ts) and re-sample. Or preview as grouped
+tables instead of JSON with `triage --limit 300 --dry-run`.
+
 ### Run automatically (cron)
 
 Daily 8am triage on the host, output logged however you like:
