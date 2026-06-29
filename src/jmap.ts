@@ -157,7 +157,10 @@ export class JmapClient {
           properties: [
             "id",
             "from",
+            // Typed asURLs is convenient but returns null for RFC 2047
+            // encoded-word headers; keep the raw header as a fallback.
             "header:List-Unsubscribe:asURLs",
+            "header:List-Unsubscribe",
             "header:List-Unsubscribe-Post:asText",
           ],
         },
@@ -167,7 +170,10 @@ export class JmapClient {
     const list = res.methodResponses[0][1].list as any[];
     return list.map((e) => {
       const from = e.from?.[0] ?? {};
-      const urls = (e["header:List-Unsubscribe:asURLs"] ?? []) as string[];
+      const typed = (e["header:List-Unsubscribe:asURLs"] ?? null) as string[] | null;
+      const urls = typed && typed.length > 0
+        ? typed
+        : parseListUnsubscribe(e["header:List-Unsubscribe"] ?? "");
       const post = (e["header:List-Unsubscribe-Post:asText"] ?? "") as string;
       return {
         id: e.id as string,
@@ -254,4 +260,47 @@ export class JmapClient {
     }
     return Object.keys(res.methodResponses[0][1].updated ?? {}).length;
   }
+}
+
+/** Decode RFC 2047 encoded-words (Q and B) in a header value. */
+function decodeEncodedWords(s: string): string {
+  // Adjacent encoded-words separated only by whitespace must be joined.
+  const joined = s.replace(/\?=\s+=\?/g, "?==?");
+  return joined.replace(
+    /=\?[^?]+\?([BbQq])\?([^?]*)\?=/g,
+    (_full, enc: string, text: string) => {
+      if (enc.toUpperCase() === "B") {
+        try {
+          return Buffer.from(text, "base64").toString("latin1");
+        } catch {
+          return "";
+        }
+      }
+      // Q-encoding: '_' is space, '=XX' is a hex byte.
+      return text
+        .replace(/_/g, " ")
+        .replace(/=([0-9A-Fa-f]{2})/g, (_m, h: string) =>
+          String.fromCharCode(parseInt(h, 16)),
+        );
+    },
+  );
+}
+
+/**
+ * Parse a raw `List-Unsubscribe` header into its target URLs, decoding any
+ * RFC 2047 encoding first. Handles `<https://…>, <mailto:…>` forms.
+ */
+export function parseListUnsubscribe(raw: string): string[] {
+  if (!raw) return [];
+  const decoded = decodeEncodedWords(raw);
+  const urls: string[] = [];
+  const re = /<([^>]+)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(decoded))) urls.push(m[1]!.trim());
+  if (urls.length > 0) return urls;
+  // No angle brackets — fall back to comma-splitting bare tokens.
+  return decoded
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => /^(https?:|mailto:)/i.test(x));
 }

@@ -49,6 +49,7 @@ bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone i
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --then trash  # unsub + bin their mail
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --skip-no-header  # only senders with a List-Unsubscribe header
+bun run src/cli.ts unsubscribe --mailbox Unsubscribe --all --apply --then trash  # process the whole folder
 bun run src/cli.ts find "Q3 launch marketing" --after 2026-01-01
 bun run src/cli.ts filters --json            # machine-readable output
 ```
