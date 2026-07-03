@@ -31,6 +31,7 @@ program
   .option("-m, --mailbox <name>", "folder to triage (default: Inbox)")
   .option("--oldest", "start with the oldest emails instead of newest", false)
   .option("--all", "include read mail, not just unread", false)
+  .option("--unread", "unread only (use with --all to drain every unread email)", false)
   .option("--dry-run", "preview only — don't move anything", false)
   .option("--json", "output raw JSON (implies no moving)", false)
   .action((opts) => run(() => triageCommand(opts)));
