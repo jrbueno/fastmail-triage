@@ -10,6 +10,7 @@ interface Opts {
   limit: number;
   batch: number;
   all?: boolean;
+  unread?: boolean;
   mailbox?: string;
   oldest?: boolean;
   json?: boolean;
@@ -57,7 +58,8 @@ export async function triageCommand(opts: Opts): Promise<void> {
     if (accounts.length > 1) ui.accountBanner(account.name);
     const jmap = new JmapClient(account.token);
 
-    const where = opts.mailbox ?? "Inbox";
+    const unreadOnly = opts.unread || !opts.all;
+    const where = `${opts.mailbox ?? "Inbox"}${unreadOnly ? " (unread)" : ""}`;
     const order = opts.oldest ? "oldest first" : "newest first";
 
     if (opts.dryRun || opts.json) {
@@ -85,7 +87,7 @@ async function previewMode(
     const want = Math.min(batchSize, opts.limit - all.length);
     const emails = await jmap.queryEmails({
       mailbox: opts.mailbox,
-      unread: !opts.all,
+      unread: opts.unread || !opts.all,
       oldestFirst: opts.oldest,
       limit: want,
       offset,
@@ -148,7 +150,7 @@ async function applyMode(
     const want = Math.min(batchSize, opts.limit - processed);
     const fetched = await jmap.queryEmails({
       mailbox: opts.mailbox,
-      unread: !opts.all,
+      unread: opts.unread || !opts.all,
       oldestFirst: opts.oldest,
       limit: want,
     });

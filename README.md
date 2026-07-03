@@ -40,6 +40,7 @@ bun run src/cli.ts triage --dry-run          # preview only, move nothing
 bun run src/cli.ts triage --oldest           # start with the oldest mail
 bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default: Inbox)
 bun run src/cli.ts triage --all --limit 80   # include read mail
+bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, no cap
 bun run src/cli.ts triage --account all       # every configured account
 
 # Clean out a huge inbox (read + unread), 40 per Claude call:
