@@ -41,6 +41,7 @@ bun run src/cli.ts triage --oldest           # start with the oldest mail
 bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default: Inbox)
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, no cap
+bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no Claude call
 bun run src/cli.ts triage --account all       # every configured account
 
 # Clean out a huge inbox (read + unread), 40 per Claude call:
@@ -147,6 +148,11 @@ into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Offers`, `Newsletter`,
 **created automatically** if missing (only the children actually needed for a
 run). Use `--dry-run` to preview without moving, `--oldest` to process the
 oldest mail first, and `--mailbox <name>` to triage a folder other than Inbox.
+
+Pass `--skip-unsubscribed` to short-circuit senders you've already unsubscribed
+from (tracked in `unsubscribed.json`): their mail is filed straight into
+`Triage/Unsubscribe` without spending a Claude call, so a recurring triage of a
+big inbox gets cheaper as the unsubscribe list grows.
 
 **Scale.** `triage` processes mail in batches (`--batch`, default 40) — each
 batch is one Claude call, then a single bulk JMAP move per category. It loops,

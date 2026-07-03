@@ -1,8 +1,9 @@
 import pc from "picocolors";
-import { senderOf } from "../fastmail.ts";
+import { senderOf, type Email } from "../fastmail.ts";
 import { triageEmails, CATEGORIES, type Category, type TriageResult } from "../ai.ts";
 import { resolveAccounts } from "../config.ts";
 import { JmapClient } from "../jmap.ts";
+import { UnsubStore } from "../unsubstore.ts";
 import * as ui from "../ui.ts";
 
 interface Opts {
@@ -13,6 +14,7 @@ interface Opts {
   unread?: boolean;
   mailbox?: string;
   oldest?: boolean;
+  skipUnsubscribed?: boolean;
   json?: boolean;
   dryRun?: boolean;
 }
@@ -50,6 +52,29 @@ function emptyTotals(): Record<Category, number> {
   return { reply: 0, fyi: 0, offers: 0, newsletter: 0, unsubscribe: 0, noise: 0 };
 }
 
+/**
+ * Classify a batch, but route mail from senders we've already unsubscribed
+ * straight to "unsubscribe" without spending a Claude call on it.
+ */
+async function classifyBatch(
+  emails: Email[],
+  store: UnsubStore | null,
+): Promise<TriageResult[]> {
+  if (!store) return triageEmails(emails);
+
+  const preFiled: TriageResult[] = [];
+  const toClassify: Email[] = [];
+  for (const e of emails) {
+    if (store.has(senderOf(e).email)) {
+      preFiled.push({ id: e.id, category: "unsubscribe", reason: "already unsubscribed" });
+    } else {
+      toClassify.push(e);
+    }
+  }
+  const classified = toClassify.length > 0 ? await triageEmails(toClassify) : [];
+  return [...preFiled, ...classified];
+}
+
 export async function triageCommand(opts: Opts): Promise<void> {
   const accounts = resolveAccounts(opts.account);
   const batchSize = Math.max(1, Math.min(opts.batch, 100));
@@ -61,11 +86,12 @@ export async function triageCommand(opts: Opts): Promise<void> {
     const unreadOnly = opts.unread || !opts.all;
     const where = `${opts.mailbox ?? "Inbox"}${unreadOnly ? " (unread)" : ""}`;
     const order = opts.oldest ? "oldest first" : "newest first";
+    const store = opts.skipUnsubscribed ? new UnsubStore(account.name) : null;
 
     if (opts.dryRun || opts.json) {
-      await previewMode(jmap, opts, batchSize, where, order);
+      await previewMode(jmap, opts, batchSize, where, order, store);
     } else {
-      await applyMode(jmap, opts, batchSize, where, order);
+      await applyMode(jmap, opts, batchSize, where, order, store);
     }
   }
 }
@@ -77,6 +103,7 @@ async function previewMode(
   batchSize: number,
   where: string,
   order: string,
+  store: UnsubStore | null,
 ): Promise<void> {
   ui.info(`Previewing up to ${opts.limit} emails from ${where} (${order})…`);
   const all: (TriageResult & { sender: string; subject: string })[] = [];
@@ -95,7 +122,7 @@ async function previewMode(
     if (emails.length === 0) break;
     offset += emails.length;
 
-    const results = await triageEmails(emails);
+    const results = await classifyBatch(emails, store);
     const byId = new Map(emails.map((e) => [e.id, e]));
     for (const r of results) {
       const e = byId.get(r.id);
@@ -131,6 +158,7 @@ async function applyMode(
   batchSize: number,
   where: string,
   order: string,
+  store: UnsubStore | null,
 ): Promise<void> {
   ui.info(`Triaging up to ${opts.limit} emails from ${where} (${order})…`);
 
@@ -160,7 +188,7 @@ async function applyMode(
     if (emails.length === 0) break;
 
     batchNo++;
-    const results = await triageEmails(emails);
+    const results = await classifyBatch(emails, store);
     const valid = new Set(emails.map((e) => e.id));
 
     // Group ids by destination category.
