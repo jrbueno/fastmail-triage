@@ -32,6 +32,7 @@ program
   .option("--oldest", "start with the oldest emails instead of newest", false)
   .option("--all", "include read mail, not just unread", false)
   .option("--unread", "unread only (use with --all to drain every unread email)", false)
+  .option("--skip-unsubscribed", "file mail from already-unsubscribed senders straight to Triage/Unsubscribe (no Claude call)", false)
   .option("--dry-run", "preview only — don't move anything", false)
   .option("--json", "output raw JSON (implies no moving)", false)
   .action((opts) => run(() => triageCommand(opts)));
