@@ -183,8 +183,12 @@ A run works through cost tiers, cheapest first:
 
 All Claude requests in a run are submitted as **one Message Batches API job**
 (50% of standard token prices; most batches finish within the hour — the CLI
-polls and shows progress). Use `--sync` for small interactive runs where batch
-latency isn't worth the discount. Use `--no-ai` for a fully zero-token coarse
+polls and shows progress). The submitted batch id and its request→email
+mapping are checkpointed to `pending-batch-<account>.json` the moment the
+batch is created, so **Ctrl-C is always safe**: the batch keeps processing
+server-side, and the next `triage` run reattaches, applies its results
+without spending new tokens, and then continues normally. Use `--sync` for
+small interactive runs where batch latency isn't worth the discount. Use `--no-ai` for a fully zero-token coarse
 triage: bulk mail is filed from headers alone (entirely-unread bulk from
 never-written-to senders → `Unsubscribe`, other bulk → `Newsletter`, automated
 notifications → `FYI`) and anything plausibly personal is left in place.

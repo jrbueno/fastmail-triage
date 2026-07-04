@@ -263,6 +263,22 @@ export class JmapClient {
     return all;
   }
 
+  /** Fetch specific emails by id (chunked to maxObjectsInGet); missing ids are skipped. */
+  async getEmailsByIds(ids: string[]): Promise<Email[]> {
+    if (ids.length === 0) return [];
+    const accountId = await this.accountId();
+    const limits = await this.limits();
+    const out: Email[] = [];
+    for (let i = 0; i < ids.length; i += limits.maxObjectsInGet) {
+      const chunk = ids.slice(i, i + limits.maxObjectsInGet);
+      const res = await this.call([
+        ["Email/get", { accountId, ids: chunk, properties: EMAIL_PROPERTIES }, "0"],
+      ]);
+      out.push(...(res.methodResponses[0][1].list as Email[]));
+    }
+    return out;
+  }
+
   /**
    * Check which of the given sender addresses the user has ever written to
    * (any message in Sent addressed to them) — a zero-token engagement signal.
