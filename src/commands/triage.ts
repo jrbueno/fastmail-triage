@@ -1,8 +1,26 @@
 import pc from "picocolors";
 import { senderOf, type Email } from "../fastmail.ts";
-import { triageEmails, CATEGORIES, type Category, type TriageResult } from "../ai.ts";
+import {
+  CATEGORIES,
+  emailTriageRequest,
+  parseSenderVerdicts,
+  parseTriageResults,
+  senderTriageRequest,
+  type Category,
+  type ClaudeRequest,
+  type SenderSummary,
+  type TriageResult,
+} from "../ai.ts";
+import { runClaudeBatch, runClaudeDirect } from "../batch.ts";
 import { resolveAccounts } from "../config.ts";
+import {
+  classifyHeuristically,
+  groupBySender,
+  isBulkish,
+  type SenderGroup,
+} from "../heuristics.ts";
 import { JmapClient } from "../jmap.ts";
+import { SenderVerdictStore } from "../senderstore.ts";
 import { UnsubStore } from "../unsubstore.ts";
 import * as ui from "../ui.ts";
 
@@ -17,6 +35,9 @@ interface Opts {
   skipUnsubscribed?: boolean;
   json?: boolean;
   dryRun?: boolean;
+  ai?: boolean; // --no-ai → false: zero-token heuristics only
+  sync?: boolean; // direct Claude calls instead of the Batches API
+  reclassify?: boolean; // ignore cached sender verdicts
 }
 
 // Parent mailbox + child mailbox (leaf) names that emails are moved into.
@@ -48,36 +69,18 @@ const COLOR: Record<Category, (s: string) => string> = {
   noise: (s) => pc.dim(s),
 };
 
+const SENDERS_PER_REQUEST = 40;
+
 function emptyTotals(): Record<Category, number> {
   return { reply: 0, fyi: 0, offers: 0, newsletter: 0, unsubscribe: 0, noise: 0 };
 }
 
-/**
- * Classify a batch, but route mail from senders we've already unsubscribed
- * straight to "unsubscribe" without spending a Claude call on it.
- */
-async function classifyBatch(
-  emails: Email[],
-  store: UnsubStore | null,
-): Promise<TriageResult[]> {
-  if (!store) return triageEmails(emails);
-
-  const preFiled: TriageResult[] = [];
-  const toClassify: Email[] = [];
-  for (const e of emails) {
-    if (store.has(senderOf(e).email)) {
-      preFiled.push({ id: e.id, category: "unsubscribe", reason: "already unsubscribed" });
-    } else {
-      toClassify.push(e);
-    }
-  }
-  const classified = toClassify.length > 0 ? await triageEmails(toClassify) : [];
-  return [...preFiled, ...classified];
+interface Classified extends TriageResult {
+  email: Email;
 }
 
 export async function triageCommand(opts: Opts): Promise<void> {
   const accounts = resolveAccounts(opts.account);
-  const batchSize = Math.max(1, Math.min(opts.batch, 100));
 
   for (const account of accounts) {
     if (accounts.length > 1) ui.accountBanner(account.name);
@@ -86,139 +89,280 @@ export async function triageCommand(opts: Opts): Promise<void> {
     const unreadOnly = opts.unread || !opts.all;
     const where = `${opts.mailbox ?? "Inbox"}${unreadOnly ? " (unread)" : ""}`;
     const order = opts.oldest ? "oldest first" : "newest first";
-    const store = opts.skipUnsubscribed ? new UnsubStore(account.name) : null;
 
-    if (opts.dryRun || opts.json) {
-      await previewMode(jmap, opts, batchSize, where, order, store);
-    } else {
-      await applyMode(jmap, opts, batchSize, where, order, store);
-    }
-  }
-}
-
-/** Read-only: paginate through up to --limit emails and show/emit the plan. */
-async function previewMode(
-  jmap: JmapClient,
-  opts: Opts,
-  batchSize: number,
-  where: string,
-  order: string,
-  store: UnsubStore | null,
-): Promise<void> {
-  ui.info(`Previewing up to ${opts.limit} emails from ${where} (${order})…`);
-  const all: (TriageResult & { sender: string; subject: string })[] = [];
-  const totals = emptyTotals();
-
-  let offset = 0;
-  while (all.length < opts.limit) {
-    const want = Math.min(batchSize, opts.limit - all.length);
-    const emails = await jmap.queryEmails({
-      mailbox: opts.mailbox,
-      unread: opts.unread || !opts.all,
-      oldestFirst: opts.oldest,
-      limit: want,
-      offset,
-    });
-    if (emails.length === 0) break;
-    offset += emails.length;
-
-    const results = await classifyBatch(emails, store);
-    const byId = new Map(emails.map((e) => [e.id, e]));
-    for (const r of results) {
-      const e = byId.get(r.id);
-      const s = e ? senderOf(e) : { name: "?", email: "" };
-      totals[r.category] = (totals[r.category] ?? 0) + 1;
-      all.push({ ...r, sender: s.name || s.email || "?", subject: e?.subject ?? "?" });
-    }
-    if (!opts.json) ui.info(pc.dim(`  …classified ${all.length}`));
-  }
-
-  if (opts.json) {
-    console.log(JSON.stringify(all, null, 2));
-    return;
-  }
-
-  for (const cat of CATEGORIES) {
-    const items = all.filter((r) => r.category === cat);
-    if (items.length === 0) continue;
-    ui.header(COLOR[cat](`${LABELS[cat]} (${items.length})`));
-    ui.table({
-      head: ["From", "Subject", "Why"],
-      colWidths: [26, 44, 40],
-      rows: items.map((r) => [r.sender, r.subject, r.reason]),
-    });
-  }
-  ui.info(`\nDry run — nothing moved. ${summary(totals)}`);
-}
-
-/** Drain the mailbox in batches, classifying then bulk-moving each batch. */
-async function applyMode(
-  jmap: JmapClient,
-  opts: Opts,
-  batchSize: number,
-  where: string,
-  order: string,
-  store: UnsubStore | null,
-): Promise<void> {
-  ui.info(`Triaging up to ${opts.limit} emails from ${where} (${order})…`);
-
-  // Create the full Triage tree once up front and cache the mailbox ids.
-  const { ids: labelIds, created } = await jmap.ensureLabelTree(
-    PARENT_LABEL,
-    CATEGORIES.map((c) => MAILBOX_NAMES[c]),
-  );
-  if (created.length > 0) ui.info(pc.dim(`Created: ${created.join(", ")}`));
-
-  const totals = emptyTotals();
-  const seen = new Set<string>();
-  let processed = 0;
-  let batchNo = 0;
-
-  while (processed < opts.limit) {
-    const want = Math.min(batchSize, opts.limit - processed);
-    const fetched = await jmap.queryEmails({
-      mailbox: opts.mailbox,
-      unread: opts.unread || !opts.all,
-      oldestFirst: opts.oldest,
-      limit: want,
-    });
-    // Skip anything we've already handled this run (e.g. a move that didn't
-    // clear the filter) to guarantee forward progress.
-    const emails = fetched.filter((e) => !seen.has(e.id));
-    if (emails.length === 0) break;
-
-    batchNo++;
-    const results = await classifyBatch(emails, store);
-    const valid = new Set(emails.map((e) => e.id));
-
-    // Group ids by destination category.
-    const byCat: Record<Category, string[]> = {
-      reply: [], fyi: [], offers: [], newsletter: [], unsubscribe: [], noise: [],
-    };
-    for (const r of results) {
-      if (!valid.has(r.id)) continue;
-      (byCat[r.category] ?? byCat.noise).push(r.id);
-    }
-
-    let movedThisBatch = 0;
-    for (const cat of CATEGORIES) {
-      const ids = byCat[cat];
-      if (ids.length === 0) continue;
-      const moved = await jmap.moveEmails(ids, labelIds[MAILBOX_NAMES[cat]]!);
-      totals[cat] += moved;
-      movedThisBatch += moved;
-    }
-
-    for (const e of emails) seen.add(e.id);
-    processed += emails.length;
-    ui.info(
-      pc.dim(`  batch ${batchNo}: classified ${emails.length}, moved ${movedThisBatch} ` +
-        `(total ${processed})`),
+    // ── 1. Fetch everything up front (paged to the server's limits) ─────────
+    ui.info(`Fetching up to ${opts.limit} emails from ${where} (${order})…`);
+    const emails = await jmap.fetchAllEmails(
+      {
+        mailbox: opts.mailbox,
+        unread: unreadOnly,
+        oldestFirst: opts.oldest,
+        limit: opts.limit,
+        withHeaders: true,
+      },
+      (n, total) =>
+        ui.info(pc.dim(`  fetched ${n}${total !== undefined ? ` of ${Math.min(total, opts.limit)}` : ""}`)),
     );
-    if (movedThisBatch === 0) break; // nothing is leaving the mailbox; avoid looping
+    if (emails.length === 0) {
+      ui.info("Nothing to triage.");
+      continue;
+    }
+
+    // ── 2. Free tiers: unsubscribe store + cached sender verdicts ───────────
+    const unsubStore = opts.skipUnsubscribed ? new UnsubStore(account.name) : null;
+    const verdictStore = new SenderVerdictStore(account.name);
+
+    const classified: Classified[] = [];
+    const remaining: Email[] = [];
+    for (const e of emails) {
+      const sender = senderOf(e).email.toLowerCase();
+      if (unsubStore?.has(sender)) {
+        classified.push({ id: e.id, category: "unsubscribe", reason: "already unsubscribed", email: e });
+        continue;
+      }
+      const cached = opts.reclassify ? null : verdictStore.get(sender);
+      if (cached) {
+        classified.push({ id: e.id, category: cached, reason: "cached sender verdict", email: e });
+        continue;
+      }
+      remaining.push(e);
+    }
+    if (classified.length > 0) {
+      ui.info(pc.dim(`  ${classified.length} classified from stores (0 tokens)`));
+    }
+
+    // ── 3. Group by sender + zero-token engagement check ────────────────────
+    const groups = groupBySender(remaining);
+    const candidates = [...groups.values()].filter(
+      (g) => g.bulk || g.automated || g.emails.length >= 5,
+    );
+    if (candidates.length > 0) {
+      ui.info(pc.dim(`  checking Sent history for ${candidates.length} bulk-looking senders…`));
+      const replied = await jmap.hasRepliedTo(candidates.map((g) => g.email));
+      for (const g of candidates) g.replied = replied.has(g.email);
+    }
+
+    let untouched = 0;
+    if (opts.ai === false) {
+      untouched = classifyWithHeuristics(groups, classified);
+    } else {
+      untouched = await classifyWithClaude(groups, classified, verdictStore, opts);
+    }
+    verdictStore.flush();
+
+    // ── 5. Emit / apply ──────────────────────────────────────────────────────
+    const totals = emptyTotals();
+    for (const r of classified) totals[r.category]++;
+
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          classified.map((r) => {
+            const s = senderOf(r.email);
+            return {
+              id: r.id,
+              category: r.category,
+              reason: r.reason,
+              sender: s.name || s.email || "?",
+              senderEmail: s.email,
+              subject: r.email.subject ?? "?",
+            };
+          }),
+          null,
+          2,
+        ),
+      );
+      if (untouched > 0) ui.info(pc.dim(`${untouched} emails left unclassified.`));
+      continue;
+    }
+
+    if (opts.dryRun) {
+      for (const cat of CATEGORIES) {
+        const items = classified.filter((r) => r.category === cat);
+        if (items.length === 0) continue;
+        ui.header(COLOR[cat](`${LABELS[cat]} (${items.length})`));
+        ui.table({
+          head: ["From", "Subject", "Why"],
+          colWidths: [26, 44, 40],
+          rows: items
+            .slice(0, 40)
+            .map((r) => {
+              const s = senderOf(r.email);
+              return [s.name || s.email || "?", r.email.subject ?? "?", r.reason];
+            }),
+        });
+        if (items.length > 40) ui.info(pc.dim(`  … and ${items.length - 40} more`));
+      }
+      ui.info(
+        `\nDry run — nothing moved. ${summary(totals)}` +
+          (untouched > 0 ? ` (${untouched} left unclassified)` : ""),
+      );
+      continue;
+    }
+
+    // Apply: create the Triage tree once, then bulk-move everything in as few
+    // Email/set calls as the server allows (mixed destinations per call).
+    const { ids: labelIds, created } = await jmap.ensureLabelTree(
+      PARENT_LABEL,
+      CATEGORIES.map((c) => MAILBOX_NAMES[c]),
+    );
+    if (created.length > 0) ui.info(pc.dim(`Created: ${created.join(", ")}`));
+
+    const destinations = new Map<string, string>(
+      classified.map((r) => [r.id, labelIds[MAILBOX_NAMES[r.category]]!]),
+    );
+    const { moved, failed } = await jmap.moveEmailsBulk(destinations, (n, total) =>
+      ui.info(pc.dim(`  moved ${n}/${total}`)),
+    );
+    if (failed.length > 0) ui.warn(`${failed.length} emails could not be moved.`);
+    ui.info(
+      pc.green(`\n✓ Filed ${moved} emails under "${PARENT_LABEL}/". ${summary(totals)}`) +
+        (untouched > 0 ? pc.dim(` ${untouched} left in place (unclassified).`) : ""),
+    );
+  }
+}
+
+/** Zero-token tier: header heuristics only. Returns the untouched count. */
+function classifyWithHeuristics(
+  groups: Map<string, SenderGroup>,
+  classified: Classified[],
+): number {
+  let untouched = 0;
+  for (const g of groups.values()) {
+    const cat = classifyHeuristically(g);
+    if (!cat) {
+      untouched += g.emails.length;
+      continue;
+    }
+    const reason = g.bulk
+      ? cat === "unsubscribe"
+        ? "bulk headers, never opened, never written to"
+        : "bulk headers (List-Unsubscribe/List-Id)"
+      : "automated notification sender";
+    for (const e of g.emails) classified.push({ id: e.id, category: cat, reason, email: e });
+  }
+  return untouched;
+}
+
+/**
+ * Claude tier: bulk-ish senders get one sender-level verdict (applied to all
+ * their mail and cached for future runs); personal-looking mail is classified
+ * per-email. All requests go through the Batches API (50% price) unless
+ * --sync. Returns the count of emails left unclassified by failures.
+ */
+async function classifyWithClaude(
+  groups: Map<string, SenderGroup>,
+  classified: Classified[],
+  verdictStore: SenderVerdictStore,
+  opts: Opts,
+): Promise<number> {
+  const senderGroups: SenderGroup[] = [];
+  const perEmail: Email[] = [];
+  for (const g of groups.values()) {
+    if (isBulkish(g)) senderGroups.push(g);
+    else perEmail.push(...g.emails);
   }
 
-  ui.info(pc.green(`\n✓ Filed ${processed} emails under "${PARENT_LABEL}/". ${summary(totals)}`));
+  const requests = new Map<string, ClaudeRequest>();
+  const senderChunks = new Map<string, SenderGroup[]>();
+  const emailChunks = new Map<string, Email[]>();
+
+  for (let i = 0; i < senderGroups.length; i += SENDERS_PER_REQUEST) {
+    const chunk = senderGroups.slice(i, i + SENDERS_PER_REQUEST);
+    const id = `s${i / SENDERS_PER_REQUEST}`;
+    senderChunks.set(id, chunk);
+    requests.set(id, senderTriageRequest(chunk.map(toSummary)));
+  }
+  const perCall = Math.max(1, Math.min(opts.batch, 100));
+  for (let i = 0; i < perEmail.length; i += perCall) {
+    const chunk = perEmail.slice(i, i + perCall);
+    const id = `e${i / perCall}`;
+    emailChunks.set(id, chunk);
+    requests.set(id, emailTriageRequest(chunk));
+  }
+
+  if (requests.size === 0) return 0;
+
+  const senderEmailCount = senderGroups.reduce((n, g) => n + g.emails.length, 0);
+  ui.info(
+    `Classifying ${senderGroups.length} bulk senders (${senderEmailCount} emails) + ` +
+      `${perEmail.length} individual emails in ${requests.size} Claude request(s) ` +
+      `via ${opts.sync ? "direct calls" : "the Batches API (50% token price)"}…`,
+  );
+
+  const run = opts.sync ? runClaudeDirect : runClaudeBatch;
+  const outcome = await run(requests, (done, total, status) =>
+    ui.info(pc.dim(`  ${status}: ${done}/${total} requests done`)),
+  );
+
+  let untouched = 0;
+
+  for (const [id, chunk] of senderChunks) {
+    const text = outcome.results.get(id);
+    if (!text) {
+      untouched += chunk.reduce((n, g) => n + g.emails.length, 0);
+      ui.warn(`Sender request ${id} failed: ${outcome.errors.get(id) ?? "no result"}`);
+      continue;
+    }
+    let verdicts;
+    try {
+      verdicts = parseSenderVerdicts(text);
+    } catch (err) {
+      untouched += chunk.reduce((n, g) => n + g.emails.length, 0);
+      ui.warn(`Sender request ${id}: ${(err as Error).message}`);
+      continue;
+    }
+    const bySender = new Map(verdicts.map((v) => [v.sender, v.category]));
+    for (const g of chunk) {
+      const cat = bySender.get(g.email);
+      if (!cat) {
+        untouched += g.emails.length;
+        continue;
+      }
+      verdictStore.record(g.email, cat); // cached only for bulk categories
+      const reason = `sender verdict (${g.emails.length} email${g.emails.length === 1 ? "" : "s"})`;
+      for (const e of g.emails) classified.push({ id: e.id, category: cat, reason, email: e });
+    }
+  }
+
+  for (const [id, chunk] of emailChunks) {
+    const text = outcome.results.get(id);
+    const valid = new Set(chunk.map((e) => e.id));
+    const byId = new Map(chunk.map((e) => [e.id, e]));
+    if (!text) {
+      untouched += chunk.length;
+      ui.warn(`Email request ${id} failed: ${outcome.errors.get(id) ?? "no result"}`);
+      continue;
+    }
+    let results;
+    try {
+      results = parseTriageResults(text);
+    } catch (err) {
+      untouched += chunk.length;
+      ui.warn(`Email request ${id}: ${(err as Error).message}`);
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const r of results) {
+      if (!valid.has(r.id) || seen.has(r.id)) continue;
+      seen.add(r.id);
+      classified.push({ ...r, email: byId.get(r.id)! });
+    }
+    untouched += chunk.length - seen.size;
+  }
+
+  return untouched;
+}
+
+function toSummary(g: SenderGroup): SenderSummary {
+  return {
+    email: g.email,
+    name: g.name,
+    total: g.emails.length,
+    unread: g.unread,
+    replied: g.replied,
+    sampleSubjects: g.emails.slice(0, 3).map((e) => (e.subject ?? "").slice(0, 100)),
+  };
 }
 
 function summary(totals: Record<Category, number>): string {

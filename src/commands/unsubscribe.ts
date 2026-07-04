@@ -23,12 +23,17 @@ interface Opts {
 async function fetchEmails(jmap: JmapClient, opts: Opts): Promise<Email[]> {
   const page = opts.limit || 100;
   if (!opts.all) {
-    return jmap.queryEmails({ mailbox: opts.mailbox, from: opts.sender, limit: page });
+    const { emails } = await jmap.queryEmails({
+      mailbox: opts.mailbox,
+      from: opts.sender,
+      limit: page,
+    });
+    return emails;
   }
   const out: Email[] = [];
   let offset = 0;
   while (out.length < 10000) {
-    const batch = await jmap.queryEmails({
+    const { emails: batch } = await jmap.queryEmails({
       mailbox: opts.mailbox,
       from: opts.sender,
       limit: page,
@@ -82,13 +87,9 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     }
 
     // Look up the List-Unsubscribe method for each, grouped per sender
-    // (chunked so a large folder doesn't build one oversized JMAP request).
+    // (getUnsubscribeInfo chunks to the server's maxObjectsInGet internally).
     ui.info("Reading List-Unsubscribe headers…");
-    const ids = emails.map((e) => e.id);
-    const infos = [];
-    for (let i = 0; i < ids.length; i += 200) {
-      infos.push(...(await jmap.getUnsubscribeInfo(ids.slice(i, i + 200))));
-    }
+    const infos = await jmap.getUnsubscribeInfo(emails.map((e) => e.id));
     let senders = groupBySender(infos);
     const store = new UnsubStore(account.name);
 
@@ -145,26 +146,32 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     let manual = 0;
     const filedIds: string[] = []; // messages to file via --then
 
-    for (const sender of senders) {
-      if (store.has(sender.senderEmail)) {
-        // Already unsubscribed in a previous run — don't contact again, just file.
-        skipped++;
-        filedIds.push(...sender.ids);
-        ui.info(pc.dim(`  • ${sender.senderEmail} — already unsubscribed, skipping`));
-        continue;
+    try {
+      for (const sender of senders) {
+        if (store.has(sender.senderEmail)) {
+          // Already unsubscribed in a previous run — don't contact again, just file.
+          skipped++;
+          filedIds.push(...sender.ids);
+          ui.info(pc.dim(`  • ${sender.senderEmail} — already unsubscribed, skipping`));
+          continue;
+        }
+        const result = await executeUnsub(sender, engine);
+        if (result.ok) {
+          ok++;
+          store.record(sender.senderEmail);
+          filedIds.push(...sender.ids);
+          ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
+        } else if (sender.method === "manual") {
+          manual++;
+          ui.info(pc.dim(`  ↗ ${sender.senderEmail} — ${result.detail}`));
+        } else {
+          ui.info(pc.red(`  ✗ ${sender.senderEmail} — ${result.detail}`));
+        }
       }
-      const result = await executeUnsub(sender, engine);
-      if (result.ok) {
-        ok++;
-        store.record(sender.senderEmail);
-        filedIds.push(...sender.ids);
-        ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
-      } else if (sender.method === "manual") {
-        manual++;
-        ui.info(pc.dim(`  ↗ ${sender.senderEmail} — ${result.detail}`));
-      } else {
-        ui.info(pc.red(`  ✗ ${sender.senderEmail} — ${result.detail}`));
-      }
+    } finally {
+      // Persist even if a sender throws mid-loop — those already contacted
+      // must not be contacted again on the next run.
+      store.flush();
     }
     ui.info(
       `\nDone: ${pc.green(`${ok} unsubscribed`)}, ${skipped} already-done, ` +

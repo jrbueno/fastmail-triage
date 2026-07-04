@@ -42,10 +42,14 @@ bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, no cap
 bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no Claude call
+bun run src/cli.ts triage --no-ai             # zero tokens: header heuristics + Sent history only
+bun run src/cli.ts triage --sync              # direct Claude calls (small runs; 2x token price vs batch)
+bun run src/cli.ts triage --reclassify        # ignore cached sender verdicts
 bun run src/cli.ts triage --account all       # every configured account
+bun run src/cli.ts limits                     # show + probe Fastmail's JMAP limits (read-only)
 
-# Clean out a huge inbox (read + unread), 40 per Claude call:
-bun run src/cli.ts triage --all --limit 100000 --batch 40
+# Clean out a huge inbox (read + unread) via the Batches API:
+bun run src/cli.ts triage --all --limit 100000
 bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
@@ -124,7 +128,9 @@ Env vars (or `.env`):
 - `ANTHROPIC_API_KEY` — required.
 - `FASTMAIL_TOKEN` — single account token, or
 - `FASTMAIL_ACCOUNTS` — `name:token,name:token` for multiple accounts.
-- `FASTMAIL_TRIAGE_MODEL` — Claude model (default `claude-sonnet-4-6`).
+- `FASTMAIL_TRIAGE_MODEL` — Claude model (default `claude-sonnet-4-6`;
+  `claude-haiku-4-5` is ~3x cheaper and usually sufficient for classification —
+  audit with `triage --limit 300 --json` before a big run).
 - `FASTMAIL_CLI_BIN` — path to the engine if not on `PATH`.
 - `FASTMAIL_TRIAGE_HOME` — config/token storage dir (default `~/.config/fastmail-triage`).
 - `FASTMAIL_TRIAGE_DEBUG=1` — log Claude prompt-cache usage (write/read/uncached tokens).
@@ -134,6 +140,10 @@ prompt (`cache_control: ephemeral`); the per-request email data goes in the user
 message. The triage rubric includes worked few-shot examples, which both sharpen
 classification and push the cached prefix over the model's minimum — so across a
 large batched run the prefix is served from cache at ~0.1x input cost.
+
+**State files** (under `FASTMAIL_TRIAGE_HOME`): `unsubscribed.json` — senders
+already unsubscribed; `sender-verdicts.json` — cached per-sender triage
+verdicts (bulk categories only), consulted on every run unless `--reclassify`.
 
 ## How it works
 
@@ -154,12 +164,37 @@ from (tracked in `unsubscribed.json`): their mail is filed straight into
 `Triage/Unsubscribe` without spending a Claude call, so a recurring triage of a
 big inbox gets cheaper as the unsubscribe list grows.
 
-**Scale.** `triage` processes mail in batches (`--batch`, default 40) — each
-batch is one Claude call, then a single bulk JMAP move per category. It loops,
-draining the mailbox until `--limit` is reached or nothing is left, so it
-handles very large inboxes (tens of thousands). Because filed mail leaves the
-source folder, you can stop (Ctrl-C) and resume anytime — re-running just
-continues with what's left.
+**Scale & cost.** `triage` is built for very large mailboxes (90k+ emails).
+A run works through cost tiers, cheapest first:
+
+1. **Stores (0 tokens).** Already-unsubscribed senders (`--skip-unsubscribed`)
+   and every sender Claude has classified in a previous run
+   (`sender-verdicts.json` — bulk categories only) are filed without any API
+   call. Recurring triage gets cheaper every run.
+2. **Sender-level classification.** Remaining mail is grouped by sender.
+   Bulk-looking senders (List-Unsubscribe/List-Id/Precedence headers,
+   automated/no-reply addresses, or high volume — and never written to, per a
+   zero-token Sent-mailbox check) get **one verdict per sender**, applied to
+   all their mail. On a big backlog this is a 20–50x token reduction vs
+   per-email classification, and sender verdicts return no `reason` field
+   (output tokens cost 5x input).
+3. **Per-email classification.** Personal-looking mail keeps the full
+   per-email rubric with reasons (`--batch` emails per request, default 40).
+
+All Claude requests in a run are submitted as **one Message Batches API job**
+(50% of standard token prices; most batches finish within the hour — the CLI
+polls and shows progress). Use `--sync` for small interactive runs where batch
+latency isn't worth the discount. Use `--no-ai` for a fully zero-token coarse
+triage: bulk mail is filed from headers alone (entirely-unread bulk from
+never-written-to senders → `Unsubscribe`, other bulk → `Newsletter`, automated
+notifications → `FYI`) and anything plausibly personal is left in place.
+
+Everything is fetched up front in pages sized from Fastmail's advertised JMAP
+limits, and moves happen as bulk `Email/set` calls with mixed destinations
+(run `fastmail-triage limits` to see and live-probe those limits — Fastmail
+advertises 4096 objects per get/set, 50 method calls per request, 10MB
+bodies). Individual request failures are reported and skipped, never fatal —
+re-running picks up whatever was left.
 
 Fetching (sort order, folder selection, pagination), folder creation, and the
 bulk moves all use a small direct-JMAP helper (`src/jmap.ts`), since the engine

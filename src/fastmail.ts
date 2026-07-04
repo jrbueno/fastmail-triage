@@ -31,6 +31,11 @@ export interface Email {
   bodyValues?: Record<string, { value: string }>;
   textBody?: { partId?: string }[];
   htmlBody?: { partId?: string }[];
+  // Raw headers fetched by the direct-JMAP path (zero-token bulk-mail heuristics).
+  "header:List-Unsubscribe:asRaw"?: string | null;
+  "header:List-Id:asRaw"?: string | null;
+  "header:Precedence:asRaw"?: string | null;
+  "header:Auto-Submitted:asRaw"?: string | null;
 }
 
 export interface Mailbox {
