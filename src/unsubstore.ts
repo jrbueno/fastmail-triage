@@ -2,6 +2,10 @@
  * Persistent record of senders we've already unsubscribed from, so re-runs
  * skip the unsubscribe request and just file their mail via --then.
  *
+ * Records are buffered in memory and persisted by flush() — call it after the
+ * apply loop (in a finally, so a mid-run failure keeps what succeeded) instead
+ * of rewriting the whole file once per sender.
+ *
  * Stored at $FASTMAIL_TRIAGE_HOME/unsubscribed.json:
  *   { "<account>": { "<sender-email>": { "unsubscribedAt": "<ISO>" } } }
  */
@@ -38,6 +42,7 @@ function save(store: Store): void {
 export class UnsubStore {
   private store: Store;
   private accountKey: string;
+  private dirty = false;
 
   constructor(account: string) {
     this.accountKey = account;
@@ -49,11 +54,18 @@ export class UnsubStore {
     return Boolean(this.store[this.accountKey]?.[senderEmail.toLowerCase()]);
   }
 
-  /** Record a sender as unsubscribed and persist immediately. */
+  /** Record a sender as unsubscribed in memory; persisted by flush(). */
   record(senderEmail: string): void {
     const acct = (this.store[this.accountKey] ??= {});
     acct[senderEmail.toLowerCase()] = { unsubscribedAt: new Date().toISOString() };
+    this.dirty = true;
+  }
+
+  /** Persist once per run instead of on every record. */
+  flush(): void {
+    if (!this.dirty) return;
     save(this.store);
+    this.dirty = false;
   }
 
   count(): number {

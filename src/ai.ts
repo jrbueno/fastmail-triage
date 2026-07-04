@@ -6,10 +6,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { type Email, extractBody, senderOf } from "./fastmail.ts";
 
 // Sonnet is the sweet spot for bulk email classification: fast + cheap + sharp.
-const MODEL = process.env.FASTMAIL_TRIAGE_MODEL || "claude-sonnet-4-6";
+// (claude-haiku-4-5 is ~3x cheaper and usually sufficient — set FASTMAIL_TRIAGE_MODEL.)
+export const MODEL = process.env.FASTMAIL_TRIAGE_MODEL || "claude-sonnet-4-6";
 
 let client: Anthropic | null = null;
-function getClient(): Anthropic {
+export function getClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not set.");
   }
@@ -102,9 +103,10 @@ export interface TriageResult {
   reason: string;
 }
 
-// Stable across every batch in a run → lives in the cached system prompt.
-const TRIAGE_SYSTEM =
-  "You are an inbox triage assistant. Classify each email into exactly one of:\n" +
+// Shared category rubric — stable across every request in a run → lives in
+// the cached system prompt (and is byte-identical between batch requests, so
+// the Batches API can share the prefix cache too).
+const CATEGORY_RUBRIC =
   "  - reply: needs a personal response from the user\n" +
   "  - fyi: informational, worth skimming, no reply needed (receipts, alerts, confirmations)\n" +
   "  - offers: promotional sales, discounts, deals, marketing from retailers\n" +
@@ -156,15 +158,106 @@ const TRIAGE_SYSTEM =
   "  • RandomBoutique <promo@shopxyz.com> / 'Dear friend, 70% off everything!!!' / unread\n" +
   "      -> unsubscribe: generic mass-marketing from an unfamiliar sender, left unread.\n" +
   "  • DealsDaily <blast@dealsdaily.net> / 'You won't believe these prices' / unread\n" +
-  "      -> unsubscribe: recurring low-value promotional blast the user isn't opening.\n\n" +
+  "      -> unsubscribe: recurring low-value promotional blast the user isn't opening.\n\n";
+
+const TRIAGE_SYSTEM =
+  "You are an inbox triage assistant. Classify each email into exactly one of:\n" +
+  CATEGORY_RUBRIC +
   'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|unsubscribe|noise","reason":"one short sentence"}]';
 
-export async function triageEmails(emails: Email[]): Promise<TriageResult[]> {
+// Sender-level classification: one verdict per sender, applied to all of its
+// mail. No "reason" field — at bulk scale the reasons are output tokens (5x
+// input price) that nobody reads.
+const TRIAGE_SENDER_SYSTEM =
+  "You are an inbox triage assistant. You will receive email SENDERS aggregated " +
+  "from the user's mailbox — one line per sender with its address, display name, " +
+  "how many emails it has in the mailbox, how many of those are unread, whether " +
+  "the user has ever written to it, and up to three sample subjects.\n\n" +
+  "Classify each SENDER into exactly one of:\n" +
+  CATEGORY_RUBRIC +
+  "Sender-level guidance: every email from the sender will be filed under your " +
+  "chosen category, so judge the sender's typical mail. Reserve 'reply' for " +
+  "senders where a human is personally waiting on the user (rare among bulk " +
+  "senders). A sender the user has never written to, whose recurring marketing " +
+  "mail sits entirely unread, is 'unsubscribe'. 'written to: yes' is a strong " +
+  "signal the user values the sender — prefer fyi/newsletter over unsubscribe/noise.\n\n" +
+  'Return ONLY a JSON array: [{"sender":"<address>","category":"reply|fyi|offers|newsletter|unsubscribe|noise"}] — no other fields.';
+
+/** A single Claude call, ready for the Batches API or a direct request. */
+export interface ClaudeRequest {
+  system: string;
+  user: string;
+  maxTokens: number;
+}
+
+export function emailTriageRequest(emails: Email[]): ClaudeRequest {
   const user = emails
     .map((e) => `--- ID: ${e.id} ---\n${emailDigest(e, false)}`)
     .join("\n\n");
   // Sized for a batch of ~50 short result objects with headroom.
-  return askJson<TriageResult[]>(TRIAGE_SYSTEM, user, 8192);
+  return { system: TRIAGE_SYSTEM, user, maxTokens: 8192 };
+}
+
+export interface SenderSummary {
+  email: string;
+  name: string;
+  total: number;
+  unread: number;
+  replied: boolean;
+  sampleSubjects: string[];
+}
+
+export interface SenderVerdict {
+  sender: string;
+  category: Category;
+}
+
+export function senderTriageRequest(senders: SenderSummary[]): ClaudeRequest {
+  const user = senders
+    .map((s) => {
+      const subjects = s.sampleSubjects.map((x) => JSON.stringify(x)).join(", ");
+      return (
+        `${s.email} | name: ${s.name || "(none)"} | emails: ${s.total} | ` +
+        `unread: ${s.unread} | written to: ${s.replied ? "yes" : "no"} | subjects: ${subjects}`
+      );
+    })
+    .join("\n");
+  return { system: TRIAGE_SENDER_SYSTEM, user, maxTokens: 4096 };
+}
+
+/** Run a prepared request directly (the --sync path). */
+export async function runRequest(req: ClaudeRequest): Promise<string> {
+  return ask(req.system, req.user, req.maxTokens);
+}
+
+function parseJsonArray<T>(text: string): T[] {
+  let t = text.trim();
+  if (t.startsWith("```")) {
+    t = t.replace(/^```(?:json)?\s*/, "").replace(/```\s*$/, "").trim();
+  }
+  // Tolerate stray prose around the array.
+  const start = t.indexOf("[");
+  const end = t.lastIndexOf("]");
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`No JSON array in response:\n${text.slice(0, 300)}`);
+  }
+  return JSON.parse(t.slice(start, end + 1)) as T[];
+}
+
+const VALID = new Set<string>(CATEGORIES);
+
+/** Parse per-email results, dropping malformed or unknown-category entries. */
+export function parseTriageResults(text: string): TriageResult[] {
+  return parseJsonArray<TriageResult>(text).filter(
+    (r) => typeof r?.id === "string" && VALID.has(r?.category),
+  );
+}
+
+/** Parse sender verdicts, dropping malformed or unknown-category entries. */
+export function parseSenderVerdicts(text: string): SenderVerdict[] {
+  return parseJsonArray<SenderVerdict>(text)
+    .filter((r) => typeof r?.sender === "string" && VALID.has(r?.category))
+    .map((r) => ({ sender: r.sender.toLowerCase(), category: r.category }));
 }
 
 // ── Unsubscribe sweep ───────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import { triageCommand } from "./commands/triage.ts";
 import { unsubscribeCommand } from "./commands/unsubscribe.ts";
 import { findCommand } from "./commands/find.ts";
 import { filtersCommand } from "./commands/filters.ts";
+import { limitsCommand } from "./commands/limits.ts";
 import {
   accountAdd,
   accountList,
@@ -33,9 +34,19 @@ program
   .option("--all", "include read mail, not just unread", false)
   .option("--unread", "unread only (use with --all to drain every unread email)", false)
   .option("--skip-unsubscribed", "file mail from already-unsubscribed senders straight to Triage/Unsubscribe (no Claude call)", false)
+  .option("--no-ai", "zero-token mode: classify from bulk-mail headers + Sent history only")
+  .option("--sync", "call Claude directly instead of the Batches API (faster for small runs, 2x token price)", false)
+  .option("--reclassify", "ignore cached sender verdicts and ask Claude again", false)
   .option("--dry-run", "preview only — don't move anything", false)
   .option("--json", "output raw JSON (implies no moving)", false)
   .action((opts) => run(() => triageCommand(opts)));
+
+program
+  .command("limits")
+  .description("Show Fastmail's JMAP limits and probe large-request handling (read-only)")
+  .option(...accountOpt)
+  .option("--no-probe", "skip the live large-request probes")
+  .action((opts) => run(() => limitsCommand(opts)));
 
 program
   .command("unsubscribe")
