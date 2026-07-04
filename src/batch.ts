@@ -31,15 +31,13 @@ function toParams(req: ClaudeRequest): MessageCreateParamsNonStreaming {
   };
 }
 
-export async function runClaudeBatch(
+/** Create the batch job(s) for a run and return their ids (no waiting). */
+export async function submitClaudeBatches(
   requests: Map<string, ClaudeRequest>,
-  onProgress?: (done: number, total: number, status: string) => void,
-): Promise<ClaudeOutcome> {
+): Promise<string[]> {
   const client = getClient();
-  const results = new Map<string, string>();
-  const errors = new Map<string, string>();
   const entries = [...requests];
-
+  const ids: string[] = [];
   for (let i = 0; i < entries.length; i += MAX_REQUESTS_PER_BATCH) {
     const slice = entries.slice(i, i + MAX_REQUESTS_PER_BATCH);
     const batch = await client.messages.batches.create({
@@ -48,26 +46,49 @@ export async function runClaudeBatch(
         params: toParams(req),
       })),
     });
+    ids.push(batch.id);
+  }
+  return ids;
+}
 
+function fmtElapsed(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+}
+
+/**
+ * Poll previously submitted batches until they end, then collect results.
+ * Works for batches created by an earlier, interrupted run (reattach) just
+ * as well as for ones created moments ago.
+ */
+export async function awaitClaudeBatches(
+  batchIds: string[],
+  onProgress?: (done: number, total: number, status: string) => void,
+): Promise<ClaudeOutcome> {
+  const client = getClient();
+  const results = new Map<string, string>();
+  const errors = new Map<string, string>();
+  const started = Date.now();
+
+  for (const batchId of batchIds) {
     // Poll fast at first (small batches often finish in under a minute),
     // then back off to 30s.
-    let status = batch;
-    let waited = 0;
+    let status = await client.messages.batches.retrieve(batchId);
     while (status.processing_status !== "ended") {
-      const delay = waited < 60_000 ? 5_000 : 30_000;
-      await Bun.sleep(delay);
-      waited += delay;
-      status = await client.messages.batches.retrieve(batch.id);
+      const elapsed = Date.now() - started;
       const c = status.request_counts;
+      const total = c.processing + c.succeeded + c.errored + c.canceled + c.expired;
       onProgress?.(
         c.succeeded + c.errored + c.canceled + c.expired,
-        slice.length,
-        status.processing_status,
+        total,
+        `${status.processing_status}, ${fmtElapsed(elapsed)} elapsed`,
       );
+      await Bun.sleep(elapsed < 60_000 ? 5_000 : 30_000);
+      status = await client.messages.batches.retrieve(batchId);
     }
 
     // Results arrive in arbitrary order — always key by custom_id.
-    for await (const result of await client.messages.batches.results(batch.id)) {
+    for await (const result of await client.messages.batches.results(batchId)) {
       const r = result.result;
       if (r.type === "succeeded") {
         const text = r.message.content
