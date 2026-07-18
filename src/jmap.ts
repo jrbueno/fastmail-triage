@@ -139,11 +139,28 @@ export class JmapClient {
       return inbox;
     }
     const lower = selector.toLowerCase();
-    const match =
-      mailboxes.find((m) => m.name.toLowerCase() === lower) ??
-      mailboxes.find((m) => m.role === lower);
+    // A "Parent/Child" path disambiguates same-named leaves (e.g. a top-level
+    // Politics folder vs Triage/Politics). Leaf names stay first-match.
+    const match = lower.includes("/")
+      ? mailboxes.find((m) => this.pathOf(m, mailboxes).toLowerCase() === lower)
+      : (mailboxes.find((m) => m.name.toLowerCase() === lower) ??
+        mailboxes.find((m) => m.role === lower));
     if (!match) throw new Error(`Mailbox "${selector}" not found.`);
     return match;
+  }
+
+  /** Full "Parent/Child" path of a mailbox, walking parentId to the root. */
+  private pathOf(box: JmapMailbox, mailboxes: JmapMailbox[]): string {
+    const byId = new Map(mailboxes.map((m) => [m.id, m]));
+    const parts = [box.name];
+    for (
+      let p = box.parentId ? byId.get(box.parentId) : undefined;
+      p;
+      p = p.parentId ? byId.get(p.parentId) : undefined
+    ) {
+      parts.unshift(p.name);
+    }
+    return parts.join("/");
   }
 
   private async buildFilter(opts: {

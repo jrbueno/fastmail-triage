@@ -39,6 +39,7 @@ bun run src/cli.ts triage                    # classify + file under Triage/
 bun run src/cli.ts triage --dry-run          # preview only, move nothing
 bun run src/cli.ts triage --oldest           # start with the oldest mail
 bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default: Inbox)
+bun run src/cli.ts triage --mailbox "Lists/Vendors"  # "Parent/Child" path when leaf names are ambiguous
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, no cap
 bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no Claude call
@@ -52,6 +53,7 @@ bun run src/cli.ts limits                     # show + probe Fastmail's JMAP lim
 bun run src/cli.ts triage --all --limit 100000
 bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
+bun run src/cli.ts unsubscribe --mailbox "Triage/Politics" --apply  # path form targets the Triage child, not a same-named top-level folder
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --then trash  # unsub + bin their mail
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply --skip-no-header  # only senders with a List-Unsubscribe header
@@ -159,6 +161,10 @@ into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Offers`, `Newsletter`,
 run). Use `--dry-run` to preview without moving, `--oldest` to process the
 oldest mail first, and `--mailbox <name>` to triage a folder other than Inbox.
 
+Everywhere a folder is named (`--mailbox`, `--then`), you can pass either a
+leaf name (`Politics` — first match wins if several folders share it) or a
+full `"Parent/Child"` path (`Triage/Politics`) to pin down exactly which one.
+
 Pass `--skip-unsubscribed` to short-circuit senders you've already unsubscribed
 from (tracked in `unsubscribed.json`): their mail is filed straight into
 `Triage/Unsubscribe` without spending a Claude call, so a recurring triage of a
@@ -216,7 +222,8 @@ Then:
    Add `--skip-no-header` to drop senders with no `List-Unsubscribe` header so the
    run only handles ones that can actually be unsubscribed.
 2. Review the list.
-3. `unsubscribe --mailbox Unsubscribe --apply` (or `--sender <email> --apply`) —
+3. `unsubscribe --mailbox Unsubscribe --apply` (or `--sender <email> --apply`;
+   use a `"Triage/Unsubscribe"` path if another folder shares the leaf name) —
    actually unsubscribes: HTTPS one-click POST (RFC 8058) or a `mailto:`
    message via the engine. Browser-only links are reported, never auto-opened.
    One request **per unique sender**, not per email.
