@@ -58,6 +58,7 @@ const MAILBOX_NAMES: Record<Category, string> = {
   fyi: "FYI",
   offers: "Offers",
   newsletter: "Newsletter",
+  politics: "Politics",
   unsubscribe: "Unsubscribe",
   noise: "Noise",
 };
@@ -67,6 +68,7 @@ const LABELS: Record<Category, string> = {
   fyi: "FYI",
   offers: "Offers",
   newsletter: "Newsletter",
+  politics: "Politics",
   unsubscribe: "Unsubscribe",
   noise: "Noise / Skip",
 };
@@ -76,6 +78,7 @@ const COLOR: Record<Category, (s: string) => string> = {
   fyi: (s) => pc.yellow(s),
   offers: (s) => pc.magenta(s),
   newsletter: (s) => pc.blue(s),
+  politics: (s) => pc.green(s),
   unsubscribe: (s) => pc.bold(pc.cyan(s)),
   noise: (s) => pc.dim(s),
 };
@@ -83,7 +86,7 @@ const COLOR: Record<Category, (s: string) => string> = {
 const SENDERS_PER_REQUEST = 40;
 
 function emptyTotals(): Record<Category, number> {
-  return { reply: 0, fyi: 0, offers: 0, newsletter: 0, unsubscribe: 0, noise: 0 };
+  return { reply: 0, fyi: 0, offers: 0, newsletter: 0, politics: 0, unsubscribe: 0, noise: 0 };
 }
 
 interface Classified extends TriageResult {

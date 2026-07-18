@@ -1,8 +1,8 @@
 /**
  * Persistent cache of Claude's per-sender triage verdicts, so mail from a
  * sender classified once is filed for free on every later run. Only bulk
- * categories (offers / newsletter / unsubscribe / noise) are cached — "reply"
- * and "fyi" depend on the individual message, never on the sender alone.
+ * categories (offers / newsletter / politics / unsubscribe / noise) are cached —
+ * "reply" and "fyi" depend on the individual message, never on the sender alone.
  *
  * Stored at $FASTMAIL_TRIAGE_HOME/sender-verdicts.json:
  *   { "<account>": { "<sender-email>": { "category": "...", "decidedAt": "<ISO>" } } }
@@ -17,6 +17,7 @@ import type { Category } from "./ai.ts";
 export const CACHEABLE_CATEGORIES: ReadonlySet<Category> = new Set([
   "offers",
   "newsletter",
+  "politics",
   "unsubscribe",
   "noise",
 ]);

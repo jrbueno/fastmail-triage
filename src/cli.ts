@@ -25,7 +25,7 @@ const accountOpt = ["-a, --account <name>", 'account name, or "all" for every ac
 
 program
   .command("triage")
-  .description("Sort mail into reply / fyi / offers / newsletter / noise and file it under Triage/")
+  .description("Sort mail into reply / fyi / offers / newsletter / politics / noise and file it under Triage/")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
   .option("-b, --batch <n>", "emails per Claude call (1-100)", (v) => parseInt(v, 10), 40)
