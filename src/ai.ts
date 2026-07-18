@@ -86,6 +86,7 @@ export type Category =
   | "fyi"
   | "offers"
   | "newsletter"
+  | "politics"
   | "unsubscribe"
   | "noise";
 export const CATEGORIES: Category[] = [
@@ -93,6 +94,7 @@ export const CATEGORIES: Category[] = [
   "fyi",
   "offers",
   "newsletter",
+  "politics",
   "unsubscribe",
   "noise",
 ];
@@ -111,6 +113,8 @@ const CATEGORY_RUBRIC =
   "  - fyi: informational, worth skimming, no reply needed (receipts, alerts, confirmations)\n" +
   "  - offers: promotional sales, discounts, deals, marketing from retailers\n" +
   "  - newsletter: recurring subscriptions, digests, editorial content you signed up for\n" +
+  "  - politics: mail from political campaigns, candidates, parties, PACs, or advocacy\n" +
+  "      groups — fundraising asks, petitions, voter outreach, political action alerts\n" +
   "  - unsubscribe: low-value bulk/marketing/newsletter mail the user clearly doesn't engage\n" +
   "      with and should stop receiving — favor this when such mail is left unread.\n" +
   "  - noise: automated notifications or spam that fit none of the above — safe to ignore\n\n" +
@@ -127,6 +131,12 @@ const CATEGORY_RUBRIC =
   "  • offers vs newsletter: 'offers' pushes a sale/discount/coupon/limited-time deal.\n" +
   "    'newsletter' delivers editorial or digest content (articles, roundups, product\n" +
   "    updates) even if it ends with a small promo. Judge by the email's primary purpose.\n" +
+  "  • politics vs offers/newsletter/unsubscribe: political content wins over format — a\n" +
+  "    political fundraising ask is 'politics' (not 'offers'), a campaign or advocacy\n" +
+  "    digest is 'politics' (not 'newsletter'), and unengaged political blasts are still\n" +
+  "    'politics' (not 'unsubscribe') so all political mail lands in one place. General\n" +
+  "    news publications that merely COVER politics stay 'newsletter'; 'politics' is for\n" +
+  "    mail from political actors trying to mobilize, persuade, or fundraise.\n" +
   "  • unsubscribe vs offers/newsletter: pick 'unsubscribe' for low-value bulk mail the\n" +
   "    user is clearly not engaging with — strong signals are an UNREAD status combined\n" +
   "    with generic mass-marketing from a sender they have no relationship with. If the\n" +
@@ -155,6 +165,10 @@ const CATEGORY_RUBRIC =
   "      -> newsletter: editorial content the user subscribed to and is reading.\n" +
   "  • GitHub <noreply@github.com> / 'Your weekly digest of repository activity' / unread\n" +
   "      -> newsletter: a recurring digest, informational rather than a sale.\n" +
+  "  • Team Rivera <info@riveraforsenate.com> / 'We're begging: $5 before the FEC deadline' / unread\n" +
+  "      -> politics: a campaign fundraising ask — political mail regardless of engagement.\n" +
+  "  • Sierra Club <action@sierraclub.org> / 'Tell your senator: vote NO on the drilling bill' / read\n" +
+  "      -> politics: an advocacy group mobilizing the user to take political action.\n" +
   "  • RandomBoutique <promo@shopxyz.com> / 'Dear friend, 70% off everything!!!' / unread\n" +
   "      -> unsubscribe: generic mass-marketing from an unfamiliar sender, left unread.\n" +
   "  • DealsDaily <blast@dealsdaily.net> / 'You won't believe these prices' / unread\n" +
@@ -163,7 +177,7 @@ const CATEGORY_RUBRIC =
 const TRIAGE_SYSTEM =
   "You are an inbox triage assistant. Classify each email into exactly one of:\n" +
   CATEGORY_RUBRIC +
-  'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|unsubscribe|noise","reason":"one short sentence"}]';
+  'Return ONLY a JSON array: [{"id":"...","category":"reply|fyi|offers|newsletter|politics|unsubscribe|noise","reason":"one short sentence"}]';
 
 // Sender-level classification: one verdict per sender, applied to all of its
 // mail. No "reason" field — at bulk scale the reasons are output tokens (5x
@@ -181,7 +195,7 @@ const TRIAGE_SENDER_SYSTEM =
   "senders). A sender the user has never written to, whose recurring marketing " +
   "mail sits entirely unread, is 'unsubscribe'. 'written to: yes' is a strong " +
   "signal the user values the sender — prefer fyi/newsletter over unsubscribe/noise.\n\n" +
-  'Return ONLY a JSON array: [{"sender":"<address>","category":"reply|fyi|offers|newsletter|unsubscribe|noise"}] — no other fields.';
+  'Return ONLY a JSON array: [{"sender":"<address>","category":"reply|fyi|offers|newsletter|politics|unsubscribe|noise"}] — no other fields.';
 
 /** A single Claude call, ready for the Batches API or a direct request. */
 export interface ClaudeRequest {
