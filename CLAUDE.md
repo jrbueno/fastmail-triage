@@ -4,16 +4,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-```bash
-bun install
-bun test                                   # all tests
-bun test src/heuristics.test.ts            # one file
-bun test -t "bulk headers detected"        # one test by name
-bun run typecheck                          # tsc --noEmit (strict, noUncheckedIndexedAccess)
-bun run build                              # → dist/fastmail-triage (compiled binary)
-bun run src/cli.ts <subcommand>            # run the CLI
-```
-
 Running any mail command needs `ANTHROPIC_API_KEY`, a configured account
 (`account add <name>`, or `FASTMAIL_TOKEN` / `FASTMAIL_ACCOUNTS=name:tok,name:tok`),
 and — for `find` and `mailto:` unsubscribes only — the Rust engine binary on `PATH`
@@ -104,22 +94,8 @@ system block. `FASTMAIL_TRIAGE_DEBUG=1` logs cache write/read/uncached tokens.
 
 ### Adding or renaming a triage category
 
-The category set is duplicated across several files by design; a new one needs
-all of:
-
-- `src/ai.ts` — the `Category` union, `CATEGORIES`, the `CATEGORY_RUBRIC` text
-  (including the "tricky boundaries" and worked-examples sections), and the
-  literal category list inside both `Return ONLY a JSON array…` lines.
-- `src/commands/triage.ts` — `MAILBOX_NAMES` (the Fastmail folder leaf),
-  `LABELS`, `COLOR`, `emptyTotals()`.
-- `src/senderstore.ts` — `CACHEABLE_CATEGORIES`, but only if the category
-  describes a *sender* rather than a message. `reply` and `fyi` are excluded on
-  purpose; caching them would misfile future mail.
-- `src/heuristics.ts` — `HeuristicCategory`, only if headers alone can prove it.
-
-Model output is untrusted: `parseTriageResults` / `parseSenderVerdicts` tolerate
-fences and prose and silently drop entries with unknown categories, so a new
-category that isn't in `CATEGORIES` fails as "unclassified", not as an error.
+The category set is duplicated across several files by design — use the
+`add-triage-category` skill for the full checklist.
 
 ### Conventions worth preserving
 
