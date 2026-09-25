@@ -10,7 +10,8 @@ AI-powered Fastmail inbox assistant. Four commands:
 | `filters` | Suggests filter/label rules based on what's actually in your inbox. |
 
 It uses [`radiosilence/fastmail-cli`](https://github.com/radiosilence/fastmail-cli) as the JMAP
-engine and [Claude](https://www.anthropic.com) for the analysis. **Multiple Fastmail accounts**
+engine, [TypeSafe](https://typesafe.ai)'s Jev model for the classification in `triage` and
+`unsubscribe`, and [Claude](https://www.anthropic.com) for the generative work (`find`, `filters`). **Multiple Fastmail accounts**
 are supported — run any command against one account or `--account all`.
 
 ## Setup (local)
@@ -24,8 +25,9 @@ cargo install --git https://github.com/radiosilence/fastmail-cli
 # 2. Install app deps
 bun install
 
-# 3. Provide your Claude key
-export ANTHROPIC_API_KEY=sk-ant-...
+# 3. Provide your API keys
+export TYPESAFE_API_KEY=...        # triage, unsubscribe
+export ANTHROPIC_API_KEY=sk-ant-... # find, filters
 
 # 4. Add a Fastmail account (token: Settings → Privacy & Security → API tokens)
 bun run src/cli.ts account add work --default
@@ -42,16 +44,17 @@ bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default
 bun run src/cli.ts triage --mailbox "Lists/Vendors"  # "Parent/Child" path when leaf names are ambiguous
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, no cap
-bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no Claude call
+bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no model call
 bun run src/cli.ts triage --no-ai             # zero tokens: header heuristics + Sent history only
-bun run src/cli.ts triage --sync              # direct Claude calls (small runs; 2x token price vs batch)
+bun run src/cli.ts triage --min-confidence 0.5 # hold back more uncertain verdicts (default 0.3)
 bun run src/cli.ts triage --reclassify        # ignore cached sender verdicts
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts limits                     # show + probe Fastmail's JMAP limits (read-only)
 
-# Clean out a huge inbox (read + unread) via the Batches API:
+# Clean out a huge inbox (read + unread):
 bun run src/cli.ts triage --all --limit 100000
 bun run src/cli.ts unsubscribe                     # preview candidates in Inbox
+bun run src/cli.ts unsubscribe --min-probability 0.5  # cast a wider net (default 0.7)
 bun run src/cli.ts unsubscribe --mailbox Unsubscribe --apply  # unsub everyone in a reviewed folder
 bun run src/cli.ts unsubscribe --mailbox "Triage/Politics" --apply  # path form targets the Triage child, not a same-named top-level folder
 bun run src/cli.ts unsubscribe --sender news@store.com --apply  # one sender
@@ -127,21 +130,19 @@ Daily 8am triage on the host, output logged however you like:
 
 Env vars (or `.env`):
 
-- `ANTHROPIC_API_KEY` — required.
+- `TYPESAFE_API_KEY` — required for `triage` (unless `--no-ai`) and for
+  `unsubscribe`'s Inbox scan.
+- `TYPESAFE_DEFAULT_MODEL` — TypeSafe model (default `jev-latest`;
+  pin a versioned id such as `jev-1.13.0` once you've tuned `--min-confidence`).
+- `ANTHROPIC_API_KEY` — required for `find` and `filters`.
 - `FASTMAIL_TOKEN` — single account token, or
 - `FASTMAIL_ACCOUNTS` — `name:token,name:token` for multiple accounts.
-- `FASTMAIL_TRIAGE_MODEL` — Claude model (default `claude-sonnet-4-6`;
-  `claude-haiku-4-5` is ~3x cheaper and usually sufficient for classification —
-  audit with `triage --limit 300 --json` before a big run).
+- `FASTMAIL_TRIAGE_MODEL` — Claude model for the non-triage commands (default
+  `claude-sonnet-4-6`; `claude-haiku-4-5` is ~3x cheaper).
 - `FASTMAIL_CLI_BIN` — path to the engine if not on `PATH`.
 - `FASTMAIL_TRIAGE_HOME` — config/token storage dir (default `~/.config/fastmail-triage`).
-- `FASTMAIL_TRIAGE_DEBUG=1` — log Claude prompt-cache usage (write/read/uncached tokens).
-
-**Prompt caching.** Each task's stable instructions live in a cached `system`
-prompt (`cache_control: ephemeral`); the per-request email data goes in the user
-message. The triage rubric includes worked few-shot examples, which both sharpen
-classification and push the cached prefix over the model's minimum — so across a
-large batched run the prefix is served from cache at ~0.1x input cost.
+- `FASTMAIL_TRIAGE_DEBUG=1` — log each TypeSafe verdict (model, input tokens,
+  category, confidence) and Claude prompt-cache usage.
 
 **State files** (under `FASTMAIL_TRIAGE_HOME`): `unsubscribed.json` — senders
 already unsubscribed; `sender-verdicts.json` — cached per-sender triage
@@ -150,7 +151,7 @@ verdicts (bulk categories only), consulted on every run unless `--reclassify`.
 ## How it works
 
 ```
-fastmail-cli (JMAP)  →  Email JSON  →  Claude (Sonnet)  →  formatted output
+JMAP  →  Email JSON  →  TypeSafe Jev (triage, unsubscribe) / Claude (find, filters)  →  formatted output
        per-account token isolation via XDG_CONFIG_HOME
 ```
 
@@ -167,34 +168,33 @@ full `"Parent/Child"` path (`Triage/Politics`) to pin down exactly which one.
 
 Pass `--skip-unsubscribed` to short-circuit senders you've already unsubscribed
 from (tracked in `unsubscribed.json`): their mail is filed straight into
-`Triage/Unsubscribe` without spending a Claude call, so a recurring triage of a
+`Triage/Unsubscribe` without a model call, so a recurring triage of a
 big inbox gets cheaper as the unsubscribe list grows.
 
 **Scale & cost.** `triage` is built for very large mailboxes (90k+ emails).
 A run works through cost tiers, cheapest first:
 
 1. **Stores (0 tokens).** Already-unsubscribed senders (`--skip-unsubscribed`)
-   and every sender Claude has classified in a previous run
+   and every sender classified in a previous run
    (`sender-verdicts.json` — bulk categories only) are filed without any API
    call. Recurring triage gets cheaper every run.
 2. **Sender-level classification.** Remaining mail is grouped by sender.
    Bulk-looking senders (List-Unsubscribe/List-Id/Precedence headers,
    automated/no-reply addresses, or high volume — and never written to, per a
    zero-token Sent-mailbox check) get **one verdict per sender**, applied to
-   all their mail. On a big backlog this is a 20–50x token reduction vs
-   per-email classification, and sender verdicts return no `reason` field
-   (output tokens cost 5x input).
-3. **Per-email classification.** Personal-looking mail keeps the full
-   per-email rubric with reasons (`--batch` emails per request, default 40).
+   all their mail. On a big backlog this is a 20–50x request reduction vs
+   per-email classification.
+3. **Per-email classification.** Personal-looking mail gets one request per
+   email.
 
-All Claude requests in a run are submitted as **one Message Batches API job**
-(50% of standard token prices; most batches finish within the hour — the CLI
-polls and shows progress). The submitted batch id and its request→email
-mapping are checkpointed to `pending-batch-<account>.json` the moment the
-batch is created, so **Ctrl-C is always safe**: the batch keeps processing
-server-side, and the next `triage` run reattaches, applies its results
-without spending new tokens, and then continues normally. Use `--sync` for
-small interactive runs where batch latency isn't worth the discount. Use `--no-ai` for a fully zero-token coarse
+Each request asks TypeSafe's Jev model one typed Choice question over the
+categories and gets back a label, a probability per category, and a
+confidence. Requests take ~100ms and are paced just under Jev's rate limit,
+so there is no batch job to wait on. Verdicts below `--min-confidence`
+(default 0.3) are **held**: listed under `--dry-run`, flagged `"held": true`
+in `--json`, and left in place instead of filed. Held sender verdicts are
+never cached. Tune the threshold on your own mail with `--dry-run` before a
+big run. Use `--no-ai` for a fully zero-token coarse
 triage: bulk mail is filed from headers alone (entirely-unread bulk from
 never-written-to senders → `Unsubscribe`, other bulk → `Newsletter`, automated
 notifications → `FYI`) and anything plausibly personal is left in place.
@@ -216,8 +216,12 @@ binary exposes none of these. The engine is still used by `find` and by
 `triage` can route low-value mail you don't engage with into `Triage/Unsubscribe`.
 Then:
 
-1. `unsubscribe` — preview candidates (in the Inbox it uses Claude to pick
-   newsletters/promo; a folder or `--sender` is taken as-is). Shows each sender's
+1. `unsubscribe` — preview candidates. In the Inbox it asks TypeSafe, once per
+   sender, how likely the sender is a newsletter/marketing/promo list that's
+   safe to leave. It sees the sender's bulk-mail headers, how much of its mail
+   you've opened, whether you've ever written to it, and sample subjects.
+   Senders at or above `--min-probability` (default 0.7) are targeted, and the
+   `P` column shows each score. A folder or `--sender` is taken as-is. Shows each sender's
    method: **1-click (auto)**, **email (auto)**, **browser (manual)**, or **no method**.
    Add `--skip-no-header` to drop senders with no `List-Unsubscribe` header so the
    run only handles ones that can actually be unsubscribed.

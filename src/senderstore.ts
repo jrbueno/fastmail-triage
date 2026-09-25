@@ -1,5 +1,5 @@
 /**
- * Persistent cache of Claude's per-sender triage verdicts, so mail from a
+ * Persistent cache of the model's per-sender triage verdicts, so mail from a
  * sender classified once is filed for free on every later run. Only bulk
  * categories (offers / newsletter / politics / unsubscribe / noise) are cached —
  * "reply" and "fyi" depend on the individual message, never on the sender alone.
@@ -11,7 +11,7 @@
 import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { configDir } from "./config.ts";
-import type { Category } from "./ai.ts";
+import type { Category } from "./classify.ts";
 
 /** Categories that describe the sender, not the individual message. */
 export const CACHEABLE_CATEGORIES: ReadonlySet<Category> = new Set([

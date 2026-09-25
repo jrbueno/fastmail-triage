@@ -5,7 +5,8 @@
 #   docker compose run --rm cli find "Q3 launch marketing"
 #
 # Provide secrets via a .env file (see .env.example):
-#   ANTHROPIC_API_KEY=...
+#   TYPESAFE_API_KEY=...                     (triage / unsubscribe)
+#   ANTHROPIC_API_KEY=...                    (find / filters)
 #   FASTMAIL_TOKEN=...                       (single account), or
 #   FASTMAIL_ACCOUNTS=work:tok_a,personal:tok_b   (multiple accounts)
 

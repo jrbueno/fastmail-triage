@@ -28,15 +28,14 @@ program
   .description("Sort mail into reply / fyi / offers / newsletter / politics / noise and file it under Triage/")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
-  .option("-b, --batch <n>", "emails per Claude call (1-100)", (v) => parseInt(v, 10), 40)
+  .option("--min-confidence <n>", "leave mail in place when the model's confidence is below this (0-1)", parseFloat, 0.3)
   .option("-m, --mailbox <name>", 'folder to triage, leaf or "Parent/Child" path (default: Inbox)')
   .option("--oldest", "start with the oldest emails instead of newest", false)
   .option("--all", "include read mail, not just unread", false)
   .option("--unread", "unread only (use with --all to drain every unread email)", false)
-  .option("--skip-unsubscribed", "file mail from already-unsubscribed senders straight to Triage/Unsubscribe (no Claude call)", false)
+  .option("--skip-unsubscribed", "file mail from already-unsubscribed senders straight to Triage/Unsubscribe (no model call)", false)
   .option("--no-ai", "zero-token mode: classify from bulk-mail headers + Sent history only")
-  .option("--sync", "call Claude directly instead of the Batches API (faster for small runs, 2x token price)", false)
-  .option("--reclassify", "ignore cached sender verdicts and ask Claude again", false)
+  .option("--reclassify", "ignore cached sender verdicts and classify again", false)
   .option("--dry-run", "preview only — don't move anything", false)
   .option("--json", "output raw JSON (implies no moving)", false)
   .action((opts) => run(() => triageCommand(opts)));
@@ -59,6 +58,7 @@ program
   .option("--apply", "actually unsubscribe (default: preview only)", false)
   .option("--then <dest>", 'after a successful unsubscribe, move that sender\'s mail (archive | trash | <folder>, leaf or "Parent/Child" path)')
   .option("--skip-no-header", "ignore senders with no List-Unsubscribe header", false)
+  .option("--min-probability <p>", "Inbox scan: only target senders the model rates at least this likely to be safe to leave (0-1)", parseFloat, 0.7)
   .option("--json", "output raw JSON", false)
   .action((opts) => run(() => unsubscribeCommand(opts)));
 

@@ -4,14 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Running any mail command needs `ANTHROPIC_API_KEY`, a configured account
+Running any mail command needs an API key — `TYPESAFE_API_KEY` for `triage` /
+`unsubscribe`, `ANTHROPIC_API_KEY` for `find` / `filters` — a configured account
 (`account add <name>`, or `FASTMAIL_TOKEN` / `FASTMAIL_ACCOUNTS=name:tok,name:tok`),
 and — for `find` and `mailto:` unsubscribes only — the Rust engine binary on `PATH`
 (`cargo install --git https://github.com/radiosilence/fastmail-cli`, or point
 `FASTMAIL_CLI_BIN` at it).
 
 Safe ways to exercise `triage` without touching a mailbox: `--dry-run` (grouped
-tables), `--json` (one object per email on stdout), `--no-ai` (zero Claude tokens).
+tables), `--json` (one object per email on stdout), `--no-ai` (zero model calls).
 `limits` is read-only and needs no API key.
 
 ## Bun conventions
@@ -19,7 +20,7 @@ tables), `--json` (one object per email on stdout), `--no-ai` (zero Claude token
 Default to Bun over Node.js: `bun <file>`, `bun test`, `bun install`, `bunx`.
 Bun loads `.env` automatically — no `dotenv`. Prefer `Bun.file`, `Bun.spawn`,
 and `Bun.$` over the `node:` equivalents (the `node:fs`/`node:path` use in
-`config.ts`, `checkpoint.ts`, and the stores is deliberate: they want sync reads
+`config.ts` and the stores is deliberate: they want sync reads
 and `mode: 0o600` on token files).
 
 ## Architecture
@@ -59,38 +60,46 @@ cost tiers cheapest-first. Understanding this order is the key to the file:
    `jmap.hasRepliedTo` answers "has the user ever written to this sender?" for
    bulk-looking candidates. `replied: true` is a veto — such senders are never
    bulk-classified and never auto-filed.
-3. **Sender-level Claude verdicts** — `isBulkish` senders get one verdict
-   applied to all their mail, with no `reason` field (output tokens cost 5x
-   input). 20–50x token reduction on a backlog.
-4. **Per-email Claude classification** — personal-looking mail only, `--batch`
-   per request.
+3. **Sender-level verdicts** — `isBulkish` senders get one request whose
+   verdict applies to all their mail. 20–50x fewer requests on a backlog.
+4. **Per-email verdicts** — personal-looking mail only, one request each.
 
 `--no-ai` stops after tier 2 (`classifyHeuristically`, which returns `null`
 rather than guessing when headers aren't conclusive).
 
-All Claude requests for a run are submitted as **one Message Batches API job**
-(`src/batch.ts`, 50% token price). `--sync` swaps in concurrent direct calls.
+### Classification on TypeSafe (`src/classify.ts`)
 
-### Batch checkpointing
+Tiers 3–4 call TypeSafe's Jev model (`@typesafe-ai/sdk`), not Claude. Each
+request is one item's `state` plus one `choice()` question whose criteria are
+`CATEGORY_CRITERIA`, so the answer is a typed `Category` with a probability
+per label. Nothing is parsed from prose. Things to preserve:
 
-A submitted batch keeps processing and billing server-side after the CLI dies,
-so `src/checkpoint.ts` writes the batch ids **and** the request→email mapping to
-`pending-batch-<account>.json` the instant the batch is created.
-`resumePendingBatch` runs at the top of every `triage` invocation, reattaches,
-and applies the results with the *current* run's flags before doing anything
-new. Consequences for anything you change here: the mapping in the checkpoint
-must stay sufficient to reconstruct classifications without re-asking Claude
-(`ingestOutcome` is shared by the live path and the resume path), and the
-checkpoint is discarded on unrecoverable reattach errors so runs can't wedge.
+- **Code computes facts; the model judges.** Read status, bulk/automated
+  kind, and Sent history are computed in code and passed as named state
+  fields. Counts are bucketed into words (`volumeBucket`, `openedBucket`)
+  because Jev is weak at numbers. Keep dates and arithmetic out of state.
+- **One item per request, lean state.** Jev loses accuracy on large state full
+  of irrelevant detail, so emails are not packed together. Throughput comes
+  from `classifyJobs`' concurrency plus a pace just under the 1,200 req/min
+  limit; the SDK retries 429s.
+- **Confidence gates action.** Verdicts below `--min-confidence` go to
+  `held`: shown, never moved, never cached in `SenderVerdictStore`. The
+  default (0.3) is a starting point to tune on real mail, not a calibrated
+  value. Pin a versioned model via `TYPESAFE_DEFAULT_MODEL` once it's tuned.
+- **Keep criteria shared.** The email and sender questions differ only in
+  `instructions`. Put boundary rules in `CATEGORY_CRITERIA`'s `not_for`
+  fields so both questions judge against the same definitions.
 
-### Prompt caching invariant
+`unsubscribe`'s Inbox scan uses the same module: one `noul()` per sender over
+the same `senderState`, with `replied` filled from Sent history first. Senders
+at or above `--min-probability` (default 0.7) are targeted. That threshold is
+deliberately higher than triage's because `--apply` contacts the sender. A
+Noul probability isn't comparable to a Choice confidence, so never share
+thresholds between the two. Both paths go through `runPaced`.
 
-`CATEGORY_RUBRIC` in `src/ai.ts` is spliced into both triage system prompts and
-carries `cache_control: ephemeral`. It must stay **byte-identical across every
-request in a run** for the prefix to be served from cache at ~0.1x, and long
-enough to clear the model's caching minimum (~1-2k tokens) — which is part of
-why the worked few-shot examples are there. Never move per-request data into the
-system block. `FASTMAIL_TRIAGE_DEBUG=1` logs cache write/read/uncached tokens.
+`FASTMAIL_TRIAGE_DEBUG=1` logs model, input tokens, and result per request.
+`src/ai.ts` still uses Claude for the generative commands (`find`
+summaries, `filters` suggestions).
 
 ### Adding or renaming a triage category
 
@@ -107,7 +116,7 @@ The category set is duplicated across several files by design — use the
   `Triage/Politics`). `resolveMailbox`/`pathOf` in `jmap.ts` implement this, and
   it applies everywhere a folder is named — `--mailbox`, `--then`.
 - **Partial failure never aborts a run.** `moveEmailsBulk` returns `failed` ids
-  instead of throwing; a bad Claude request is counted as `untouched` and
+  instead of throwing; a failed TypeSafe request is counted as `untouched` and
   reported. Re-running picks up whatever was left.
 - **Stores buffer in memory and `flush()` once.** `UnsubStore.flush()` is called
   from a `finally` — senders already contacted must not be contacted twice.
@@ -118,7 +127,7 @@ The category set is duplicated across several files by design — use the
 ### State (all under `FASTMAIL_TRIAGE_HOME`, default `~/.config/fastmail-triage`)
 
 `config.json` (accounts + default), `unsubscribed.json`, `sender-verdicts.json`,
-`pending-batch-<account>.json`, `engine/<account>/` (engine tokens). All written
+`engine/<account>/` (engine tokens). All written
 `0o600`. Env-provided accounts override same-named file accounts.
 
 ## Docker

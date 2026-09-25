@@ -1,7 +1,8 @@
 import pc from "picocolors";
 import { FastmailEngine, senderOf, type Email } from "../fastmail.ts";
-import { findUnsubscribeCandidates } from "../ai.ts";
+import { scoreUnsubscribeCandidates } from "../classify.ts";
 import { resolveAccounts } from "../config.ts";
+import { groupBySender as groupForModel } from "../heuristics.ts";
 import { JmapClient } from "../jmap.ts";
 import { groupBySender, executeUnsub, type Method } from "../unsub.ts";
 import { UnsubStore } from "../unsubstore.ts";
@@ -16,17 +17,19 @@ interface Opts {
   apply?: boolean;
   then?: string;
   skipNoHeader?: boolean;
+  minProbability: number;
   json?: boolean;
 }
 
 /** Fetch emails for the scope: a single page (--limit), or all of them (--all). */
-async function fetchEmails(jmap: JmapClient, opts: Opts): Promise<Email[]> {
+async function fetchEmails(jmap: JmapClient, opts: Opts, withHeaders: boolean): Promise<Email[]> {
   const page = opts.limit || 100;
   if (!opts.all) {
     const { emails } = await jmap.queryEmails({
       mailbox: opts.mailbox,
       from: opts.sender,
       limit: page,
+      withHeaders,
     });
     return emails;
   }
@@ -38,6 +41,7 @@ async function fetchEmails(jmap: JmapClient, opts: Opts): Promise<Email[]> {
       from: opts.sender,
       limit: page,
       offset,
+      withHeaders,
     });
     out.push(...batch);
     if (batch.length < page) break;
@@ -54,6 +58,9 @@ const METHOD_LABEL: Record<Method, string> = {
 };
 
 export async function unsubscribeCommand(opts: Opts): Promise<void> {
+  if (!(opts.minProbability >= 0 && opts.minProbability <= 1)) {
+    throw new Error("--min-probability must be a number between 0 and 1.");
+  }
   const accounts = resolveAccounts(opts.account);
 
   for (const account of accounts) {
@@ -65,19 +72,23 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     const where = opts.sender
       ? `sender ${opts.sender}`
       : (opts.mailbox ?? "Inbox");
+    // Inbox discovery mode (no explicit folder or sender) asks the model which
+    // senders to target; a reviewed folder or an explicit sender is taken as-is.
+    const discover = !opts.sender && !opts.mailbox;
     ui.info(`Scanning ${where}${opts.all ? " (all)" : ""}…`);
-    let emails = await fetchEmails(jmap, opts);
+    // Discovery needs the bulk-mail headers that feed the model's sender state.
+    let emails = await fetchEmails(jmap, opts, discover);
     if (emails.length === 0) {
       ui.info("No emails found.");
       continue;
     }
 
-    // In Inbox discovery mode (no explicit folder or sender), let Claude narrow
-    // to newsletters/promo. A reviewed folder or an explicit sender is taken as-is.
-    if (!opts.sender && !opts.mailbox) {
-      ui.info(`Identifying unsubscribe candidates among ${emails.length} emails…`);
-      const candidates = await findUnsubscribeCandidates(emails);
-      const wanted = new Set(candidates.map((c) => c.sender_email.toLowerCase()));
+    let scores: Map<string, number> | null = null;
+    if (discover) {
+      scores = await pickCandidates(jmap, emails);
+      const wanted = new Set(
+        [...scores].filter(([, p]) => p >= opts.minProbability).map(([sender]) => sender),
+      );
       emails = emails.filter((e) => wanted.has(senderOf(e).email.toLowerCase()));
     }
 
@@ -107,20 +118,28 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
       continue;
     }
 
+    const probability = (s: { senderEmail: string }) =>
+      scores?.get(s.senderEmail.toLowerCase()) ?? null;
+
     if (opts.json) {
-      const annotated = senders.map((s) => ({ ...s, alreadyUnsubscribed: store.has(s.senderEmail) }));
+      const annotated = senders.map((s) => ({
+        ...s,
+        probability: probability(s),
+        alreadyUnsubscribed: store.has(s.senderEmail),
+      }));
       console.log(JSON.stringify(annotated, null, 2));
       continue;
     }
 
     ui.header(`Unsubscribe Candidates (${senders.length} senders)`);
     ui.table({
-      head: ["Sender", "Email", "#", "Method", "Prev?"],
-      colWidths: [22, 30, 5, 18, 7],
+      head: ["Sender", "Email", "#", ...(scores ? ["P"] : []), "Method", "Prev?"],
+      colWidths: [22, 30, 5, ...(scores ? [6] : []), 18, 7],
       rows: senders.map((s) => [
         s.senderName || "",
         s.senderEmail,
         String(s.count),
+        ...(scores ? [probability(s)?.toFixed(2) ?? "?"] : []),
         METHOD_LABEL[s.method],
         store.has(s.senderEmail) ? "✓" : "",
       ]),
@@ -184,4 +203,24 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
       ui.info(pc.green(`Moved ${moved} message${moved === 1 ? "" : "s"} to "${opts.then}".`));
     }
   }
+}
+
+/**
+ * Ask TypeSafe, once per sender, how likely it is to be a list the user can
+ * safely leave. Returns sender address → probability; senders whose request
+ * failed are absent, so they're never targeted.
+ */
+async function pickCandidates(jmap: JmapClient, emails: Email[]): Promise<Map<string, number>> {
+  const groups = [...groupForModel(emails).values()];
+  const replied = await jmap.hasRepliedTo(groups.map((g) => g.email));
+  for (const g of groups) g.replied = replied.has(g.email);
+
+  ui.info(`Identifying unsubscribe candidates among ${groups.length} senders…`);
+  const { results, errors } = await scoreUnsubscribeCandidates(groups);
+  let shown = 0;
+  for (const [sender, err] of errors) {
+    if (shown++ < 5) ui.warn(`Request for ${sender} failed: ${err}`);
+  }
+  if (errors.size > 5) ui.warn(`…and ${errors.size - 5} more failed requests.`);
+  return results;
 }
