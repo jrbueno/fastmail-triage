@@ -7,7 +7,7 @@
  *   - "Has the user ever written to this sender?" (a Sent-mailbox query) is
  *     the engagement signal that keeps personal mail out of the bulk tiers.
  *
- * These never claim "reply" — anything plausibly personal is left for Claude
+ * These never claim "reply" — anything plausibly personal is left for the model
  * (or, under --no-ai, left untouched).
  */
 

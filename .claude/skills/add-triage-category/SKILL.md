@@ -8,9 +8,10 @@ description: Checklist for adding, renaming, or removing a triage category (e.g.
 The category set is duplicated across several files by design; a new one needs
 all of:
 
-- `src/ai.ts` — the `Category` union, `CATEGORIES`, the `CATEGORY_RUBRIC` text
-  (including the "tricky boundaries" and worked-examples sections), and the
-  literal category list inside both `Return ONLY a JSON array…` lines.
+- `src/classify.ts` — the `Category` union, `CATEGORIES`, and a
+  `CATEGORY_CRITERIA` entry (`covers` / `not_for` / `examples`). The
+  `satisfies Record<Category, …>` makes a missing entry a type error. Update
+  the `not_for` of any neighbouring category the new one takes mail from.
 - `src/commands/triage.ts` — `MAILBOX_NAMES` (the Fastmail folder leaf),
   `LABELS`, `COLOR`, `emptyTotals()`.
 - `src/senderstore.ts` — `CACHEABLE_CATEGORIES`, but only if the category
@@ -18,6 +19,7 @@ all of:
   purpose; caching them would misfile future mail.
 - `src/heuristics.ts` — `HeuristicCategory`, only if headers alone can prove it.
 
-Model output is untrusted: `parseTriageResults` / `parseSenderVerdicts` tolerate
-fences and prose and silently drop entries with unknown categories, so a new
-category that isn't in `CATEGORIES` fails as "unclassified", not as an error.
+The criteria keys are the Choice labels TypeSafe returns, so the model can
+only ever answer with a category in `CATEGORY_CRITERIA`. Re-check
+`--min-confidence` after the change: a new label that overlaps an existing one
+splits probability between them and lowers confidence on that boundary.

@@ -6,7 +6,6 @@ import {
   isBulkish,
   isNoReplyAddress,
 } from "./heuristics.ts";
-import { parseSenderVerdicts, parseTriageResults } from "./ai.ts";
 import type { Email } from "./fastmail.ts";
 
 function email(over: Partial<Email> & { id: string }): Email {
@@ -63,17 +62,4 @@ test("personal mail is not classified heuristically", () => {
   const g = groupBySender([email({ id: "1" })]).get("a@x.com")!;
   expect(classifyHeuristically(g)).toBeNull();
   expect(isBulkish(g)).toBe(false);
-});
-
-test("parseTriageResults tolerates fences and prose, drops bad entries", () => {
-  const text =
-    'Here you go:\n```json\n[{"id":"a","category":"reply","reason":"r"},' +
-    '{"id":"b","category":"bogus","reason":"r"},{"category":"noise"}]\n```';
-  const out = parseTriageResults(text);
-  expect(out).toEqual([{ id: "a", category: "reply", reason: "r" }]);
-});
-
-test("parseSenderVerdicts lowercases and validates", () => {
-  const out = parseSenderVerdicts('[{"sender":"News@Store.com","category":"offers"}]');
-  expect(out).toEqual([{ sender: "news@store.com", category: "offers" }]);
 });
