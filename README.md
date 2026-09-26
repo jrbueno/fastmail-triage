@@ -1,11 +1,13 @@
 # fastmail-triage
 
-AI-powered Fastmail inbox assistant. Four commands:
+AI-powered Fastmail inbox assistant. Six commands:
 
 | Command | What it does |
 |---|---|
 | `triage` | Sorts mail into **Needs Reply / FYI / Offers / Newsletter / Politics / Unsubscribe / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
 | `unsubscribe` | Finds newsletters & promo senders and **actually unsubscribes** via `List-Unsubscribe` (one-click POST or mailto), with a human-in-the-loop review step. |
+| `stats` | Zero-token report: folder totals, the shape of a folder (unread, list, automated), top senders with their cached verdicts, and mailing lists you never open. |
+| `calibrate` | Runs the classifier over mail that's already filed, measures accuracy at each confidence threshold, and recommends a `--min-confidence`. |
 | `find <query>` | Pulls a thread/topic (`"what did marketing say about the Q3 launch?"`) and summarizes it. |
 | `filters` | Suggests filter/label rules based on what's actually in your inbox. |
 
@@ -50,6 +52,9 @@ bun run src/cli.ts triage --min-confidence 0.5 # hold back more uncertain verdic
 bun run src/cli.ts triage --reclassify        # ignore cached sender verdicts
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts limits                     # show + probe Fastmail's JMAP limits (read-only)
+bun run src/cli.ts stats                      # folder totals, top senders, never-opened lists (no model calls)
+bun run src/cli.ts stats -m Triage/Newsletter --top 50  # which lists pile up unread in a triage folder
+bun run src/cli.ts stats --all --json | jq .ignoredLists  # every never-opened list, as data
 
 # Clean out a huge inbox (read + unread):
 bun run src/cli.ts triage --all --limit 100000
@@ -114,9 +119,35 @@ jq -r '.[] | select(.category=="reply" or .category=="fyi")
         | "[\(.category)] \(.sender) — \(.subject)"' sample.json
 ```
 
-If a sender is consistently miscategorized, add or tweak a worked example in
-`TRIAGE_SYSTEM` in [src/ai.ts](src/ai.ts) and re-sample. Or preview as grouped
+If a sender is consistently miscategorized, tighten the `covers` / `not_for` /
+`examples` of the categories involved in `CATEGORY_CRITERIA`
+([src/classify.ts](src/classify.ts)) and re-sample. Or preview as grouped
 tables instead of JSON with `triage --limit 300 --dry-run`.
+
+### Tune `--min-confidence` with `calibrate`
+
+`calibrate` samples the newest emails from labelled folders, runs them through
+the same routing as `triage` (without the verdict cache, and writing nothing),
+and reports accuracy at each threshold:
+
+```bash
+bun run src/cli.ts calibrate                      # Triage/* folders, 40 emails each
+bun run src/cli.ts calibrate -l Shopping=offers -l "Lists/Town=newsletter"  # add hand-filed folders
+bun run src/cli.ts calibrate --no-triage-folders -l Receipts=fyi   # hand-filed labels only
+bun run src/cli.ts calibrate --target 0.95 --json > calib.json    # every scored email, for jq
+```
+
+It prints a threshold sweep (share filed, accuracy, wrong moves), the lowest
+threshold that reaches `--target` accuracy (default 90%), per-category
+recall/precision, a confusion matrix, and the most confident disagreements.
+
+Mind what the labels mean. Mail in `Triage/*` was filed by earlier runs, so it
+measures **agreement with the previous classifier**, not correctness. It is
+also almost all unread, because it was filed before you saw it, which pushes
+the model's engagement signal toward `unsubscribe`. Folders you filed by hand
+(`--label`) are the real ground truth. Re-run after changing
+`CATEGORY_CRITERIA` or the model, and pin `TYPESAFE_DEFAULT_MODEL` to the
+version you calibrated.
 
 ### Run automatically (cron)
 
@@ -216,6 +247,9 @@ binary exposes none of these. The engine is still used by `find` and by
 `triage` can route low-value mail you don't engage with into `Triage/Unsubscribe`.
 Then:
 
+0. Optionally, `stats -m Triage/Newsletter` (or any folder) lists mailing
+   lists with 3+ emails that you've never opened and never written to. It's
+   free, and a good source of `--sender` targets.
 1. `unsubscribe` — preview candidates. In the Inbox it asks TypeSafe, once per
    sender, how likely the sender is a newsletter/marketing/promo list that's
    safe to leave. It sees the sender's bulk-mail headers, how much of its mail
