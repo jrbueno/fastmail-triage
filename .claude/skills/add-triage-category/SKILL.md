@@ -21,5 +21,6 @@ all of:
 
 The criteria keys are the Choice labels TypeSafe returns, so the model can
 only ever answer with a category in `CATEGORY_CRITERIA`. Re-check
-`--min-confidence` after the change: a new label that overlaps an existing one
+`--min-confidence` after the change (`calibrate`, which also needs the new
+folder in `MAILBOX_NAMES` to sample it): a new label that overlaps an existing one
 splits probability between them and lowers confidence on that boundary.

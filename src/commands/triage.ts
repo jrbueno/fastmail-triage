@@ -1,18 +1,19 @@
 import pc from "picocolors";
 import { senderOf, type Email } from "../fastmail.ts";
 import {
+  buildJobs,
   CATEGORIES,
   classifyJobs,
   describeVerdict,
+  jobEmails,
   type Category,
-  type Job,
   type Verdict,
 } from "../classify.ts";
 import { resolveAccounts } from "../config.ts";
 import {
   classifyHeuristically,
   groupBySender,
-  isBulkish,
+  looksBulk,
   type SenderGroup,
 } from "../heuristics.ts";
 import { JmapClient } from "../jmap.ts";
@@ -36,8 +37,8 @@ interface Opts {
 }
 
 // Parent mailbox + child mailbox (leaf) names that emails are moved into.
-const PARENT_LABEL = "Triage";
-const MAILBOX_NAMES: Record<Category, string> = {
+export const PARENT_LABEL = "Triage";
+export const MAILBOX_NAMES: Record<Category, string> = {
   reply: "Needs Reply",
   fyi: "FYI",
   offers: "Offers",
@@ -146,9 +147,7 @@ export async function triageCommand(opts: Opts): Promise<void> {
 
     // ── 3. Group by sender + zero-token engagement check ────────────────────
     const groups = groupBySender(remaining);
-    const candidates = [...groups.values()].filter(
-      (g) => g.bulk || g.automated || g.emails.length >= 5,
-    );
+    const candidates = [...groups.values()].filter(looksBulk);
     if (candidates.length > 0) {
       ui.info(pc.dim(`  checking Sent history for ${candidates.length} bulk-looking senders…`));
       const replied = await jmap.hasRepliedTo(candidates.map((g) => g.email));
@@ -203,21 +202,17 @@ async function classifyWithModel(
   verdictStore: SenderVerdictStore,
   minConfidence: number,
 ): Promise<void> {
-  const jobs = new Map<string, Job>();
+  const jobs = buildJobs(groups.values());
+  if (jobs.size === 0) return;
   let senderCount = 0;
   let senderEmailCount = 0;
   let perEmailCount = 0;
-  for (const g of groups.values()) {
-    if (isBulkish(g)) {
-      jobs.set(`s:${g.email}`, { kind: "sender", group: g });
+  for (const job of jobs.values()) {
+    if (job.kind === "sender") {
       senderCount++;
-      senderEmailCount += g.emails.length;
-    } else {
-      for (const e of g.emails) jobs.set(`e:${e.id}`, { kind: "email", email: e, group: g });
-      perEmailCount += g.emails.length;
-    }
+      senderEmailCount += job.group.emails.length;
+    } else perEmailCount++;
   }
-  if (jobs.size === 0) return;
 
   ui.info(
     `Classifying ${senderCount} bulk senders (${senderEmailCount} emails) + ` +
@@ -231,7 +226,7 @@ async function classifyWithModel(
 
   let failures = 0;
   for (const [key, job] of jobs) {
-    const emails = job.kind === "sender" ? job.group.emails : [job.email];
+    const emails = jobEmails(job);
     const v = verdicts.get(key);
     if (!v) {
       outcome.untouched += emails.length;
