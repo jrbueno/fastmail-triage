@@ -6,6 +6,8 @@ import { unsubscribeCommand } from "./commands/unsubscribe.ts";
 import { findCommand } from "./commands/find.ts";
 import { filtersCommand } from "./commands/filters.ts";
 import { limitsCommand } from "./commands/limits.ts";
+import { statsCommand } from "./commands/stats.ts";
+import { calibrateCommand } from "./commands/calibrate.ts";
 import {
   accountAdd,
   accountList,
@@ -17,7 +19,7 @@ const program = new Command();
 
 program
   .name("fastmail-triage")
-  .description("AI-powered Fastmail inbox assistant (triage, unsubscribe, find, filters).")
+  .description("AI-powered Fastmail inbox assistant (triage, unsubscribe, stats, calibrate, find, filters).")
   .version("0.1.0");
 
 // Shared --account option: a name, or "all" to fan out across every account.
@@ -46,6 +48,34 @@ program
   .option(...accountOpt)
   .option("--no-probe", "skip the live large-request probes")
   .action((opts) => run(() => limitsCommand(opts)));
+
+program
+  .command("calibrate")
+  .description("Measure triage accuracy on already-filed mail and recommend a --min-confidence")
+  .option(...accountOpt)
+  .option("-n, --per-folder <n>", "newest emails to sample from each labelled folder", (v) => parseInt(v, 10), 40)
+  .option(
+    "-l, --label <folder=category>",
+    'label a folder you filed by hand, e.g. "Shopping=offers" (repeatable)',
+    (v: string, acc: string[]) => [...acc, v],
+    [] as string[],
+  )
+  .option("--no-triage-folders", "don't sample the Triage/* folders; use only --label folders")
+  .option("--target <p>", "accuracy the recommended threshold must reach (0-1)", parseFloat, 0.9)
+  .option("--json", "output raw JSON (sweep + every scored email)", false)
+  .action((opts) => run(() => calibrateCommand(opts)));
+
+program
+  .command("stats")
+  .description("Report folder totals, top senders, and never-opened mailing lists (no model calls)")
+  .option(...accountOpt)
+  .option("-m, --mailbox <name>", 'folder to scan, leaf or "Parent/Child" path (default: Inbox)')
+  .option("-n, --limit <n>", "max emails to scan, newest first", (v) => parseInt(v, 10), 5000)
+  .option("--all", "scan the whole folder, ignoring --limit", false)
+  .option("-t, --top <n>", "rows per sender table", (v) => parseInt(v, 10), 20)
+  .option("--no-sent-check", "skip the Sent-history lookup (faster; ignored lists aren't vetted)")
+  .option("--json", "output raw JSON", false)
+  .action((opts) => run(() => statsCommand(opts)));
 
 program
   .command("unsubscribe")

@@ -13,7 +13,8 @@ and — for `find` and `mailto:` unsubscribes only — the Rust engine binary on
 
 Safe ways to exercise `triage` without touching a mailbox: `--dry-run` (grouped
 tables), `--json` (one object per email on stdout), `--no-ai` (zero model calls).
-`limits` is read-only and needs no API key.
+`limits` and `stats` are read-only and need no model API key (`stats` reads
+folder counts, headers, Sent history, and the local stores).
 
 ## Bun conventions
 
@@ -84,8 +85,10 @@ per label. Nothing is parsed from prose. Things to preserve:
   limit; the SDK retries 429s.
 - **Confidence gates action.** Verdicts below `--min-confidence` go to
   `held`: shown, never moved, never cached in `SenderVerdictStore`. The
-  default (0.3) is a starting point to tune on real mail, not a calibrated
-  value. Pin a versioned model via `TYPESAFE_DEFAULT_MODEL` once it's tuned.
+  default (0.3) is a starting point, not a calibrated value; `calibrate`
+  (`src/commands/calibrate.ts`) measures it on labelled folders. It must keep
+  using `buildJobs` and `looksBulk` so it scores the same routing triage runs.
+  Pin a versioned model via `TYPESAFE_DEFAULT_MODEL` once it's tuned.
 - **Keep criteria shared.** The email and sender questions differ only in
   `instructions`. Put boundary rules in `CATEGORY_CRITERIA`'s `not_for`
   fields so both questions judge against the same definitions.

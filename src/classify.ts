@@ -15,7 +15,7 @@
 
 import { choice, noul, TypeSafeClient, type ChoiceResponse, type JsonValue } from "@typesafe-ai/sdk";
 import { senderOf, type Email } from "./fastmail.ts";
-import { isUnread, type SenderGroup } from "./heuristics.ts";
+import { isBulkish, isUnread, type SenderGroup } from "./heuristics.ts";
 
 export type Category =
   | "reply"
@@ -258,6 +258,25 @@ export interface Verdict {
 export type Job =
   | { kind: "email"; email: Email; group?: SenderGroup }
   | { kind: "sender"; group: SenderGroup };
+
+/**
+ * Route each group the way triage does: bulk-ish senders get one sender-level
+ * job (`s:<email>`), everyone else one job per email (`e:<id>`). Fill
+ * `replied` first — it is what keeps engaged senders per-email.
+ */
+export function buildJobs(groups: Iterable<SenderGroup>): Map<string, Job> {
+  const jobs = new Map<string, Job>();
+  for (const g of groups) {
+    if (isBulkish(g)) jobs.set(`s:${g.email}`, { kind: "sender", group: g });
+    else for (const e of g.emails) jobs.set(`e:${e.id}`, { kind: "email", email: e, group: g });
+  }
+  return jobs;
+}
+
+/** The emails a job's verdict applies to. */
+export function jobEmails(job: Job): Email[] {
+  return job.kind === "sender" ? job.group.emails : [job.email];
+}
 
 function toVerdict(a: ChoiceResponse<typeof CATEGORY_CRITERIA>): Verdict {
   const ranked = Object.entries(a.probabilities).sort((x, y) => y[1] - x[1]);

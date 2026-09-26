@@ -36,6 +36,8 @@ export interface JmapMailbox {
   name: string;
   parentId: string | null;
   role: string | null;
+  totalEmails?: number;
+  unreadEmails?: number;
 }
 
 /** Standard listing properties for triage. */
@@ -129,6 +131,14 @@ export class JmapClient {
     const res = await this.call([["Mailbox/get", { accountId, ids: null }, "0"]]);
     this.mailboxCache = res.methodResponses[0][1].list as JmapMailbox[];
     return this.mailboxCache;
+  }
+
+  /** Every mailbox with its full "Parent/Child" path, sorted by path. */
+  async mailboxesWithPaths(): Promise<(JmapMailbox & { path: string })[]> {
+    const mailboxes = await this.getMailboxes();
+    return mailboxes
+      .map((m) => ({ ...m, path: this.pathOf(m, mailboxes) }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }
 
   /** Resolve a mailbox by leaf name (case-insensitive) or role. */

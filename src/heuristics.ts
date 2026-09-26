@@ -75,6 +75,11 @@ export function groupBySender(emails: Email[]): Map<string, SenderGroup> {
  */
 export function isBulkish(g: SenderGroup): boolean {
   if (g.replied) return false;
+  return looksBulk(g);
+}
+
+/** Bulk-looking before the Sent-history veto: the senders worth checking in Sent. */
+export function looksBulk(g: SenderGroup): boolean {
   return g.bulk || g.automated || g.emails.length >= 5;
 }
 
