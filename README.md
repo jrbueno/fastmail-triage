@@ -270,14 +270,28 @@ Then:
 3. `unsubscribe --mailbox Unsubscribe --apply` (or `--sender <email> --apply`;
    use a `"Triage/Unsubscribe"` path if another folder shares the leaf name) —
    actually unsubscribes: HTTPS one-click POST (RFC 8058) or a `mailto:`
-   message via the engine. Browser-only links are reported, never auto-opened.
+   message via the engine. If that fails or the sender has no usable header
+   method, it falls back to the **unsubscribe link in the email body** (link
+   text or URL mentioning unsubscribe/opt-out, HTTPS only) and opens it,
+   keeping cookies across redirects. If it lands on a confirmation page, it
+   presses the unsubscribe/confirm button (never resubscribe, cancel, or
+   update-preferences), leaves topic checkboxes unticked, and fills an empty
+   email field with the address the mail was sent to. A page that still shows
+   any form or button afterwards is reported as failed rather than counted as
+   done. The header's own browser-only link is reported, never auto-opened.
+   In a terminal, each failure with a link shows it and asks **y/n: did you
+   unsubscribe in the browser?** — `y` records the sender (and files its mail
+   via `--then`) like any other success. If a prompt goes unanswered for a
+   minute, the run moves on and stops prompting for the rest of that run.
    One request **per unique sender**, not per email.
 4. Optionally add `--then trash` / `--then archive` / `--then <folder>` to file
    the existing mail of senders that unsubscribed **successfully** (failed or
    browser-only senders are left untouched).
 
 Successful unsubscribes are **remembered** per account (in
-`$FASTMAIL_TRIAGE_HOME/unsubscribed.json`). On later runs those senders are
+`$FASTMAIL_TRIAGE_HOME/unsubscribed.json`, with the link used when it came
+from the body; a link already used for one sender isn't fetched again for
+another). On later runs those senders are
 **not contacted again** — they're marked `Prev ✓` in the preview, and under
 `--apply` they're skipped but their new mail is still filed via `--then`. So a
 recurring `unsubscribe --mailbox Unsubscribe --apply --then trash` keeps binning

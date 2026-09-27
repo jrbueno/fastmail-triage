@@ -6,6 +6,10 @@
  *  - email:     send a message to the mailto: unsubscribe address
  *  - manual:    only an HTTPS link with no one-click — must be opened in a browser
  *  - none:      no List-Unsubscribe header present
+ *
+ * When the header route fails (or there is none), the command falls back to
+ * an unsubscribe link found in the email body: extractBodyUnsubUrl picks it,
+ * followUnsubLink (unsubform.ts) opens it and submits any confirmation form.
  */
 
 import { FastmailEngine } from "./fastmail.ts";
@@ -120,4 +124,55 @@ export async function executeUnsub(
   } catch (err) {
     return { sender, ok: false, detail: (err as Error).message };
   }
+}
+
+const UNSUB_WORDS = /unsubscribe|unsub\b|opt[\s-]?out/i;
+const UNSUB_HREF = /unsubscribe|unsub|optout|opt-out|opt_out/i;
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Pick the most likely unsubscribe link from an email's bodies. HTTPS only.
+ * Scores: link text says unsubscribe (3) > href says unsubscribe (2) >
+ * "unsubscribe … click here" just before the link (1). Plain text is a
+ * fallback for mail with no HTML part. Returns null when nothing qualifies.
+ */
+export function extractBodyUnsubUrl(html: string, text: string): string | null {
+  const pick = (found: { url: string; score: number }[]) =>
+    found
+      .filter((c) => c.score > 0 && /^https:\/\//i.test(c.url))
+      .reduce<{ url: string; score: number } | null>((b, c) => (!b || c.score > b.score ? c : b), null)
+      ?.url ?? null;
+
+  const fromHtml: { url: string; score: number }[] = [];
+  const anchor = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
+  for (const m of html.matchAll(anchor)) {
+    const url = decodeEntities((m[1] ?? m[2] ?? m[3] ?? "").trim());
+    const label = decodeEntities(m[4]!.replace(/<[^>]*>/g, " "));
+    const before = decodeEntities(html.slice(Math.max(0, m.index - 200), m.index).replace(/<[^>]*>/g, " "));
+    const score = UNSUB_WORDS.test(label) ? 3 : UNSUB_HREF.test(url) ? 2 : UNSUB_WORDS.test(before) ? 1 : 0;
+    fromHtml.push({ url, score });
+  }
+  const best = pick(fromHtml);
+  if (best) return best;
+
+  const fromText: { url: string; score: number }[] = [];
+  const lines = text.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    for (const [url] of line.matchAll(/https:\/\/[^\s<>"')\]]+/gi)) {
+      const nearby = `${lines[i - 1] ?? ""} ${line}`;
+      fromText.push({ url, score: UNSUB_HREF.test(url) ? 2 : UNSUB_WORDS.test(nearby) ? 1 : 0 });
+    }
+  });
+  return pick(fromText);
 }

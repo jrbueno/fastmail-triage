@@ -411,6 +411,40 @@ export class JmapClient {
     return out;
   }
 
+  /**
+   * Fetch one email's decoded HTML and plain-text bodies (each part joined)
+   * and first To address, for following an unsubscribe link in the body.
+   * Missing id → empty strings.
+   */
+  async getBodies(id: string): Promise<{ html: string; text: string; to: string }> {
+    const accountId = await this.accountId();
+    const res = await this.call([
+      [
+        "Email/get",
+        {
+          accountId,
+          ids: [id],
+          properties: ["to", "htmlBody", "textBody", "bodyValues"],
+          fetchHTMLBodyValues: true,
+          fetchTextBodyValues: true,
+        },
+        "0",
+      ],
+    ]);
+    const e = res.methodResponses[0][1].list?.[0];
+    if (!e) return { html: "", text: "", to: "" };
+    const join = (parts: { partId: string; type: string }[] | undefined, type: string) =>
+      (parts ?? [])
+        .filter((p) => p.type === type)
+        .map((p) => e.bodyValues?.[p.partId]?.value ?? "")
+        .join("\n");
+    return {
+      html: join(e.htmlBody, "text/html"),
+      text: join(e.textBody, "text/plain"),
+      to: (e.to?.[0]?.email ?? "") as string,
+    };
+  }
+
   private async createMailbox(name: string, parentId: string | null): Promise<string> {
     const accountId = await this.accountId();
     const res = await this.call([

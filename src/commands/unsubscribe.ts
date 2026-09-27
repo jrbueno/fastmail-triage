@@ -1,10 +1,18 @@
+import { confirm, isCancel } from "@clack/prompts";
 import pc from "picocolors";
 import { FastmailEngine, senderOf, type Email } from "../fastmail.ts";
 import { scoreUnsubscribeCandidates } from "../classify.ts";
 import { resolveAccounts } from "../config.ts";
 import { groupBySender as groupForModel } from "../heuristics.ts";
 import { JmapClient } from "../jmap.ts";
-import { groupBySender, executeUnsub, type Method } from "../unsub.ts";
+import {
+  groupBySender,
+  executeUnsub,
+  extractBodyUnsubUrl,
+  type Method,
+  type SenderUnsub,
+} from "../unsub.ts";
+import { followUnsubLink } from "../unsubform.ts";
 import { UnsubStore } from "../unsubstore.ts";
 import * as ui from "../ui.ts";
 
@@ -126,6 +134,7 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
         ...s,
         probability: probability(s),
         alreadyUnsubscribed: store.has(s.senderEmail),
+        bodyUrl: store.urlFor(s.senderEmail),
       }));
       console.log(JSON.stringify(annotated, null, 2));
       continue;
@@ -150,8 +159,10 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
         (s) => !store.has(s.senderEmail) && (s.method === "one-click" || s.method === "email"),
       ).length;
       const known = senders.filter((s) => store.has(s.senderEmail)).length;
+      const fallback = senders.filter((s) => !store.has(s.senderEmail)).length - todo;
       ui.info(
         `\n${todo} new senders can be unsubscribed automatically` +
+          (fallback ? `; ${fallback} more will try an unsubscribe link from the email body` : "") +
           (known ? `; ${known} already unsubscribed (Prev ✓) will just be filed` : "") +
           `. Re-run with ${pc.bold("--apply")} to act.`,
       );
@@ -161,8 +172,12 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     // --apply: unsubscribe new senders; skip ones already done in a prior run.
     ui.info(pc.yellow(`\nUnsubscribing… (this contacts each new sender)`));
     let ok = 0;
+    let viaBody = 0;
     let skipped = 0;
     let manual = 0;
+    let byHand = 0;
+    // Offer the link for failures; one unanswered prompt turns this off for the run.
+    let prompting = Boolean(process.stdin.isTTY);
     const filedIds: string[] = []; // messages to file via --then
 
     try {
@@ -174,18 +189,37 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
           ui.info(pc.dim(`  • ${sender.senderEmail} — already unsubscribed, skipping`));
           continue;
         }
-        const result = await executeUnsub(sender, engine);
+        let result: { ok: boolean; detail: string; url?: string } = await executeUnsub(sender, engine);
+        if (!result.ok) {
+          // Every header method failed or there was none: try the body's link.
+          result = (await unsubscribeViaBody(jmap, store, sender)) ?? result;
+        }
         if (result.ok) {
           ok++;
-          store.record(sender.senderEmail);
+          if (result.url) viaBody++;
+          store.record(sender.senderEmail, result.url);
           filedIds.push(...sender.ids);
           ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
-        } else if (sender.method === "manual") {
-          manual++;
-          ui.info(pc.dim(`  ↗ ${sender.senderEmail} — ${result.detail}`));
-        } else {
-          ui.info(pc.red(`  ✗ ${sender.senderEmail} — ${result.detail}`));
+          continue;
         }
+        const failed = `${sender.senderEmail} — ${result.detail}`;
+        ui.info(sender.method === "manual" ? pc.dim(`  ↗ ${failed}`) : pc.red(`  ✗ ${failed}`));
+
+        const link = result.url ?? (/^https:/i.test(sender.target) ? sender.target : null);
+        if (prompting && link) {
+          const answer = await askDoneInBrowser(link);
+          if (answer === "timeout") {
+            prompting = false;
+            ui.warn("  No answer in 1 minute — not prompting again this run.");
+          } else if (answer) {
+            byHand++;
+            store.record(sender.senderEmail, link);
+            filedIds.push(...sender.ids);
+            ui.info(pc.green(`  ✓ ${sender.senderEmail} — done in browser`));
+            continue;
+          }
+        }
+        if (sender.method === "manual") manual++;
       }
     } finally {
       // Persist even if a sender throws mid-loop — those already contacted
@@ -193,8 +227,10 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
       store.flush();
     }
     ui.info(
-      `\nDone: ${pc.green(`${ok} unsubscribed`)}, ${skipped} already-done, ` +
-        `${manual} need a browser, ${senders.length - ok - skipped - manual} failed/unsupported.`,
+      `\nDone: ${pc.green(`${ok} unsubscribed`)}${viaBody ? ` (${viaBody} via body link)` : ""}, ` +
+        (byHand ? `${pc.green(`${byHand} done in browser`)}, ` : "") +
+        `${skipped} already-done, ${manual} need a browser, ` +
+        `${senders.length - ok - byHand - skipped - manual} failed/unsupported.`,
     );
 
     // --then: file the existing mail of senders that are unsubscribed (new + prior).
@@ -223,4 +259,51 @@ async function pickCandidates(jmap: JmapClient, emails: Email[]): Promise<Map<st
   }
   if (errors.size > 5) ui.warn(`…and ${errors.size - 5} more failed requests.`);
   return results;
+}
+
+const PROMPT_TIMEOUT_MS = 60_000;
+
+/**
+ * Show a failed sender's link and ask whether the user unsubscribed by hand.
+ * "timeout" when unanswered for a minute; Ctrl-C aborts the run (the store
+ * is still flushed by the caller's finally).
+ */
+async function askDoneInBrowser(link: string): Promise<boolean | "timeout"> {
+  const signal = AbortSignal.timeout(PROMPT_TIMEOUT_MS);
+  const answer = await confirm({
+    message: `Open ${pc.cyan(link)}\n  Unsubscribed in the browser?`,
+    initialValue: false,
+    output: process.stderr,
+    signal,
+  });
+  if (isCancel(answer)) {
+    if (signal.aborted) return "timeout";
+    throw new Error("Cancelled.");
+  }
+  return answer;
+}
+
+/** How many of a sender's emails to search for a body unsubscribe link. */
+const BODY_SCAN_LIMIT = 3;
+
+/**
+ * Fallback when the List-Unsubscribe header can't be used: find an unsubscribe
+ * link in the body of one of the sender's emails, open it, and submit any
+ * confirmation form (filling an empty email field with the To address). A link another
+ * sender was already unsubscribed through isn't fetched again. Returns null
+ * when no link is found, so the caller keeps the header result's detail.
+ */
+async function unsubscribeViaBody(
+  jmap: JmapClient,
+  store: UnsubStore,
+  sender: SenderUnsub,
+): Promise<{ ok: boolean; detail: string; url: string } | null> {
+  for (const id of sender.ids.slice(0, BODY_SCAN_LIMIT)) {
+    const { html, text, to } = await jmap.getBodies(id);
+    const url = extractBodyUnsubUrl(html, text);
+    if (!url) continue;
+    if (store.hasUrl(url)) return { ok: true, detail: "body link already used", url };
+    return { ...(await followUnsubLink(url, to)), url };
+  }
+  return null;
 }
