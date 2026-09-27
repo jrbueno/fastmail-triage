@@ -58,11 +58,21 @@ export class SenderVerdictStore {
     return this.store[this.accountKey]?.[senderEmail.toLowerCase()]?.category ?? null;
   }
 
-  /** Record a verdict in memory; ignored unless the category is sender-level. */
+  /**
+   * Record a verdict in memory. A non-sender-level category isn't cached, and
+   * clears any earlier entry so a sender that stopped looking bulk isn't still
+   * filed from a stale verdict under --use-cache.
+   */
   record(senderEmail: string, category: Category): void {
-    if (!CACHEABLE_CATEGORIES.has(category)) return;
     const acct = (this.store[this.accountKey] ??= {});
-    acct[senderEmail.toLowerCase()] = { category, decidedAt: new Date().toISOString() };
+    const key = senderEmail.toLowerCase();
+    if (CACHEABLE_CATEGORIES.has(category)) {
+      acct[key] = { category, decidedAt: new Date().toISOString() };
+    } else if (key in acct) {
+      delete acct[key];
+    } else {
+      return;
+    }
     this.dirty = true;
   }
 
