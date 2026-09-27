@@ -86,7 +86,7 @@ per label. Nothing is parsed from prose. Things to preserve:
   limit; the SDK retries 429s.
 - **Confidence gates action.** Verdicts below `--min-confidence` go to
   `held`: shown, never moved, never cached in `SenderVerdictStore`. The
-  default (0.3) is a starting point, not a calibrated value; `calibrate`
+  default (0.4, `DEFAULT_MIN_CONFIDENCE` in `triage.ts`) is a starting point, not a calibrated value; `calibrate`
   (`src/commands/calibrate.ts`) measures it on labelled folders. It must keep
   using `buildJobs` and `looksBulk` so it scores the same routing triage runs.
   Pin a versioned model via `TYPESAFE_DEFAULT_MODEL` once it's tuned.

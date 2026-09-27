@@ -21,7 +21,7 @@ import { senderOf, type Email } from "../fastmail.ts";
 import { groupBySender, looksBulk } from "../heuristics.ts";
 import { JmapClient } from "../jmap.ts";
 import * as ui from "../ui.ts";
-import { MAILBOX_NAMES, PARENT_LABEL } from "./triage.ts";
+import { DEFAULT_MIN_CONFIDENCE, MAILBOX_NAMES, PARENT_LABEL } from "./triage.ts";
 
 interface Opts {
   account?: string;
@@ -33,7 +33,6 @@ interface Opts {
 }
 
 export const THRESHOLDS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
-const DEFAULT_MIN_CONFIDENCE = 0.3; // triage's --min-confidence default
 
 /** One sampled email with its folder label and the model's verdict. */
 export interface Scored {

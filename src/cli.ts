@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import * as ui from "./ui.ts";
-import { triageCommand } from "./commands/triage.ts";
+import { DEFAULT_MIN_CONFIDENCE, triageCommand } from "./commands/triage.ts";
 import { unsubscribeCommand } from "./commands/unsubscribe.ts";
 import { findCommand } from "./commands/find.ts";
 import { filtersCommand } from "./commands/filters.ts";
@@ -30,7 +30,7 @@ program
   .description("Sort mail into reply / fyi / offers / newsletter / politics / noise and file it under Triage/")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
-  .option("--min-confidence <n>", "leave mail in place when the model's confidence is below this (0-1)", parseFloat, 0.3)
+  .option("--min-confidence <n>", "leave mail in place when the model's confidence is below this (0-1)", parseFloat, DEFAULT_MIN_CONFIDENCE)
   .option("-m, --mailbox <name>", 'folder to triage, leaf or "Parent/Child" path (default: Inbox)')
   .option("--oldest", "start with the oldest emails instead of newest", false)
   .option("--all", "include read mail, not just unread", false)
