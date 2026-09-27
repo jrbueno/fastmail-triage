@@ -49,7 +49,7 @@ bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, n
 bun run src/cli.ts triage --include-pinned    # triage pinned (flagged) mail too
 bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no model call
 bun run src/cli.ts triage --no-ai             # zero tokens: header heuristics + Sent history only
-bun run src/cli.ts triage --min-confidence 0.5 # hold back more uncertain verdicts (default 0.3)
+bun run src/cli.ts triage --min-confidence 0.5 # hold back more uncertain verdicts (default 0.4)
 bun run src/cli.ts triage --use-cache         # file senders decided in an earlier run, no model call
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts limits                     # show + probe Fastmail's JMAP limits (read-only)
@@ -228,7 +228,7 @@ Each request asks TypeSafe's Jev model one typed Choice question over the
 categories and gets back a label, a probability per category, and a
 confidence. Requests take ~100ms and are paced just under Jev's rate limit,
 so there is no batch job to wait on. Verdicts below `--min-confidence`
-(default 0.3) are **held**: listed under `--dry-run`, flagged `"held": true`
+(default 0.4) are **held**: listed under `--dry-run`, flagged `"held": true`
 in `--json`, and left in place instead of filed. Held sender verdicts are
 never cached. Tune the threshold on your own mail with `--dry-run` before a
 big run. Use `--no-ai` for a fully zero-token coarse
