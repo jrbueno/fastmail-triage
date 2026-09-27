@@ -177,6 +177,7 @@ export class JmapClient {
     mailbox?: string;
     from?: string;
     unread?: boolean;
+    skipPinned?: boolean;
   }): Promise<Record<string, unknown>> {
     const mailboxes = await this.getMailboxes();
     const filter: Record<string, unknown> = {};
@@ -187,7 +188,18 @@ export class JmapClient {
       filter.inMailbox = this.resolveMailbox(mailboxes, undefined).id;
     }
     if (opts.from) filter.from = opts.from;
-    if (opts.unread) filter.notKeyword = "$seen";
+    // A FilterCondition holds one notKeyword, so a second exclusion needs AND.
+    // Fastmail's "pin" is the standard $flagged keyword.
+    const excluded = [opts.unread && "$seen", opts.skipPinned && "$flagged"].filter(
+      (k): k is string => Boolean(k),
+    );
+    if (excluded.length === 1) filter.notKeyword = excluded[0];
+    if (excluded.length > 1) {
+      return {
+        operator: "AND",
+        conditions: [filter, ...excluded.map((k) => ({ notKeyword: k }))],
+      };
+    }
     return filter;
   }
 
@@ -199,6 +211,7 @@ export class JmapClient {
     mailbox?: string;
     from?: string;
     unread?: boolean;
+    skipPinned?: boolean;
     oldestFirst?: boolean;
     limit?: number;
     offset?: number;
@@ -249,6 +262,7 @@ export class JmapClient {
     opts: {
       mailbox?: string;
       unread?: boolean;
+      skipPinned?: boolean;
       oldestFirst?: boolean;
       limit: number;
       withHeaders?: boolean;
@@ -269,6 +283,7 @@ export class JmapClient {
       const page = await this.queryEmails({
         mailbox: opts.mailbox,
         unread: opts.unread,
+        skipPinned: opts.skipPinned,
         oldestFirst: opts.oldestFirst,
         limit: want,
         offset: position,

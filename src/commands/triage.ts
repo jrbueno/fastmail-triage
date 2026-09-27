@@ -29,6 +29,7 @@ interface Opts {
   unread?: boolean;
   mailbox?: string;
   oldest?: boolean;
+  includePinned?: boolean;
   skipUnsubscribed?: boolean;
   json?: boolean;
   dryRun?: boolean;
@@ -101,7 +102,9 @@ export async function triageCommand(opts: Opts): Promise<void> {
     const jmap = new JmapClient(account.token);
 
     const unreadOnly = opts.unread || !opts.all;
-    const where = `${opts.mailbox ?? "Inbox"}${unreadOnly ? " (unread)" : ""}`;
+    const skipPinned = !opts.includePinned;
+    const filters = [unreadOnly && "unread", skipPinned && "not pinned"].filter(Boolean);
+    const where = `${opts.mailbox ?? "Inbox"}${filters.length ? ` (${filters.join(", ")})` : ""}`;
     const order = opts.oldest ? "oldest first" : "newest first";
 
     // ── 1. Fetch everything up front (paged to the server's limits) ─────────
@@ -110,6 +113,7 @@ export async function triageCommand(opts: Opts): Promise<void> {
       {
         mailbox: opts.mailbox,
         unread: unreadOnly,
+        skipPinned,
         oldestFirst: opts.oldest,
         limit: opts.limit,
         withHeaders: true,
