@@ -73,7 +73,7 @@ program
   .option("-m, --mailbox <name>", 'folder to scan, leaf or "Parent/Child" path (default: Inbox)')
   .option("-n, --limit <n>", "max emails to scan, newest first", (v) => parseInt(v, 10), 5000)
   .option("--all", "scan the whole folder, ignoring --limit", false)
-  .option("-t, --top <n>", "rows per sender table", (v) => parseInt(v, 10), 20)
+  .option("-t, --top <n>", 'rows per sender table, or "all" for every sender', (v) => (v === "all" ? Infinity : parseInt(v, 10)), 20)
   .option("--no-sent-check", "skip the Sent-history lookup (faster; ignored lists aren't vetted)")
   .option("--json", "output raw JSON", false)
   .action((opts) => run(() => statsCommand(opts)));

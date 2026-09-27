@@ -54,7 +54,8 @@ bun run src/cli.ts triage --use-cache         # file senders decided in an earli
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts limits                     # show + probe Fastmail's JMAP limits (read-only)
 bun run src/cli.ts stats                      # folder totals, top senders, never-opened lists (no model calls)
-bun run src/cli.ts stats -m Triage/Newsletter --top 50  # which lists pile up unread in a triage folder
+bun run src/cli.ts stats -m Triage/Newsletter --top 50  # one folder's report (no all-folders table), 50 rows per table
+bun run src/cli.ts stats --top all            # every sender, not just the top 20
 bun run src/cli.ts stats --all --json | jq .ignoredLists  # every never-opened list, as data
 
 # Clean out a huge inbox (read + unread):
