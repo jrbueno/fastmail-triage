@@ -88,7 +88,7 @@ program
   .option("-s, --sender <email>", "target a single sender")
   .option("--apply", "actually unsubscribe (default: preview only)", false)
   .option("--then <dest>", 'after a successful unsubscribe, move that sender\'s mail (archive | trash | <folder>, leaf or "Parent/Child" path)')
-  .option("--skip-no-header", "ignore senders with no List-Unsubscribe header", false)
+  .option("--skip-no-header", "ignore senders with no List-Unsubscribe header (no body-link fallback for them either)", false)
   .option("--min-probability <p>", "Inbox scan: only target senders the model rates at least this likely to be safe to leave (0-1)", parseFloat, 0.7)
   .option("--json", "output raw JSON", false)
   .action((opts) => run(() => unsubscribeCommand(opts)));
