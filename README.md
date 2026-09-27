@@ -46,6 +46,7 @@ bun run src/cli.ts triage --mailbox Archive  # triage a specific folder (default
 bun run src/cli.ts triage --mailbox "Lists/Vendors"  # "Parent/Child" path when leaf names are ambiguous
 bun run src/cli.ts triage --all --limit 80   # include read mail
 bun run src/cli.ts triage --all --unread --limit 100000  # every unread email, no cap
+bun run src/cli.ts triage --include-pinned    # triage pinned (flagged) mail too
 bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no model call
 bun run src/cli.ts triage --no-ai             # zero tokens: header heuristics + Sent history only
 bun run src/cli.ts triage --min-confidence 0.5 # hold back more uncertain verdicts (default 0.3)
@@ -196,6 +197,11 @@ oldest mail first, and `--mailbox <name>` to triage a folder other than Inbox.
 Everywhere a folder is named (`--mailbox`, `--then`), you can pass either a
 leaf name (`Politics` — first match wins if several folders share it) or a
 full `"Parent/Child"` path (`Triage/Politics`) to pin down exactly which one.
+
+Pinned mail is left alone by default. Fastmail's pin is the JMAP `$flagged`
+keyword; it's excluded in the server-side query, so pinned mail is never
+fetched, classified, or moved, and doesn't count toward `--limit`. Pass
+`--include-pinned` to triage it anyway.
 
 Pass `--skip-unsubscribed` to short-circuit senders you've already unsubscribed
 from (tracked in `unsubscribed.json`): their mail is filed straight into
