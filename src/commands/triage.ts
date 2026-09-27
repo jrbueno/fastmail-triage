@@ -37,6 +37,9 @@ interface Opts {
   useCache?: boolean; // file senders from cached sender verdicts
 }
 
+/** Default --min-confidence. A starting point, not calibrated; see `calibrate`. */
+export const DEFAULT_MIN_CONFIDENCE = 0.4;
+
 // Parent mailbox + child mailbox (leaf) names that emails are moved into.
 export const PARENT_LABEL = "Triage";
 export const MAILBOX_NAMES: Record<Category, string> = {
