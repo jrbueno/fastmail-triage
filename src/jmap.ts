@@ -494,14 +494,11 @@ export class JmapClient {
   }
 
   /**
-   * Move emails into a mailbox resolved by name or role (e.g. "archive",
-   * "trash", or a folder name). Returns the number moved.
+   * Id of a mailbox resolved by role (e.g. "archive", "trash"), leaf name,
+   * or "Parent/Child" path. Throws if none matches.
    */
-  async moveEmailsTo(ids: string[], selector: string): Promise<number> {
-    if (ids.length === 0) return 0;
-    const mailboxes = await this.getMailboxes();
-    const box = this.resolveMailbox(mailboxes, selector);
-    return this.moveEmails(ids, box.id);
+  async mailboxId(selector: string): Promise<string> {
+    return this.resolveMailbox(await this.getMailboxes(), selector).id;
   }
 
   /**
