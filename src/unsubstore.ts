@@ -16,6 +16,8 @@ import { configDir } from "./config.ts";
 
 interface Entry {
   unsubscribedAt: string;
+  /** Set when the unsubscribe went through a link found in the email body. */
+  url?: string;
 }
 type Store = Record<string, Record<string, Entry>>;
 
@@ -55,10 +57,23 @@ export class UnsubStore {
   }
 
   /** Record a sender as unsubscribed in memory; persisted by flush(). */
-  record(senderEmail: string): void {
+  record(senderEmail: string, url?: string): void {
     const acct = (this.store[this.accountKey] ??= {});
-    acct[senderEmail.toLowerCase()] = { unsubscribedAt: new Date().toISOString() };
+    acct[senderEmail.toLowerCase()] = {
+      unsubscribedAt: new Date().toISOString(),
+      ...(url ? { url } : {}),
+    };
     this.dirty = true;
+  }
+
+  /** The body link a sender was unsubscribed through, if any. */
+  urlFor(senderEmail: string): string | null {
+    return this.store[this.accountKey]?.[senderEmail.toLowerCase()]?.url ?? null;
+  }
+
+  /** True if some sender was already unsubscribed through this exact body link. */
+  hasUrl(url: string): boolean {
+    return Object.values(this.store[this.accountKey] ?? {}).some((e) => e.url === url);
   }
 
   /** Persist once per run instead of on every record. */

@@ -125,7 +125,15 @@ The category set is duplicated across several files by design — use the
 - **Stores buffer in memory and `flush()` once.** `UnsubStore.flush()` is called
   from a `finally` — senders already contacted must not be contacted twice.
 - **`unsubscribe` only contacts anyone under `--apply`.** Browser-only
-  (`manual`) links are reported, never auto-opened; `--then` files mail only for
+  (`manual`) header links are reported, never auto-opened. When every header
+  method fails, `unsubscribeViaBody` follows an unsubscribe link from the
+  body and stores it with the sender in `UnsubStore`. `src/unsubform.ts`
+  submits a confirmation form only through a control reading as
+  unsubscribe/confirm (never resubscribe/keep/preferences); a page still
+  showing any form or button after that counts as failed. On a TTY, each
+  failure with a link gets a y/n "done it in the browser?" prompt
+  (`askDoneInBrowser`); one that times out (60s) turns prompting off for the
+  rest of the run. `--then` files mail only for
   senders that actually unsubscribed.
 
 ### State (all under `FASTMAIL_TRIAGE_HOME`, default `~/.config/fastmail-triage`)
