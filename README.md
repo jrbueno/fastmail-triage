@@ -281,12 +281,13 @@ Then:
    done. The header's own browser-only link is reported, never auto-opened.
    In a terminal, each failure with a link shows it and asks **y/n: did you
    unsubscribe in the browser?** — `y` records the sender (and files its mail
-   via `--then`) like any other success. If a prompt goes unanswered for a
+   via `--then`) like any other success, and a later sender sharing that
+   exact link is counted as done without asking again. If a prompt goes unanswered for a
    minute, the run moves on and stops prompting for the rest of that run.
    One request **per unique sender**, not per email.
 4. Optionally add `--then trash` / `--then archive` / `--then <folder>` to file
-   the existing mail of senders that unsubscribed **successfully** (failed or
-   browser-only senders are left untouched).
+   the existing mail of senders that unsubscribed **successfully**, right after
+   each one succeeds (failed or browser-only senders are left untouched).
 
 Successful unsubscribes are **remembered** per account (in
 `$FASTMAIL_TRIAGE_HOME/unsubscribed.json`, with the link used when it came

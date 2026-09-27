@@ -178,15 +178,33 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
     let byHand = 0;
     // Offer the link for failures; one unanswered prompt turns this off for the run.
     let prompting = Boolean(process.stdin.isTTY);
-    const filedIds: string[] = []; // messages to file via --then
+    // --then: resolve the folder before contacting anyone, then file each
+    // sender's mail as soon as it's unsubscribed (new or from a prior run).
+    const thenId = opts.then ? await jmap.mailboxId(opts.then) : null;
+    let moved = 0;
+    let moveFailed = 0;
+    const file = async (sender: (typeof senders)[number]) => {
+      if (!thenId) return;
+      try {
+        const res = await jmap.moveEmailsBulk(new Map(sender.ids.map((id) => [id, thenId])));
+        moved += res.moved;
+        moveFailed += res.failed.length;
+        if (res.failed.length > 0) {
+          ui.warn(`    ${res.failed.length} message(s) from ${sender.senderEmail} could not be moved`);
+        }
+      } catch (err) {
+        moveFailed += sender.ids.length;
+        ui.warn(`    could not move mail from ${sender.senderEmail}: ${(err as Error).message}`);
+      }
+    };
 
     try {
       for (const sender of senders) {
         if (store.has(sender.senderEmail)) {
           // Already unsubscribed in a previous run — don't contact again, just file.
           skipped++;
-          filedIds.push(...sender.ids);
           ui.info(pc.dim(`  • ${sender.senderEmail} — already unsubscribed, skipping`));
+          await file(sender);
           continue;
         }
         let result: { ok: boolean; detail: string; url?: string } = await executeUnsub(sender, engine);
@@ -198,14 +216,22 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
           ok++;
           if (result.url) viaBody++;
           store.record(sender.senderEmail, result.url);
-          filedIds.push(...sender.ids);
           ui.info(pc.green(`  ✓ ${sender.senderEmail} — ${result.detail}`));
+          await file(sender);
           continue;
         }
         const failed = `${sender.senderEmail} — ${result.detail}`;
         ui.info(sender.method === "manual" ? pc.dim(`  ↗ ${failed}`) : pc.red(`  ✗ ${failed}`));
 
         const link = result.url ?? (/^https:/i.test(sender.target) ? sender.target : null);
+        if (link && store.hasUrl(link)) {
+          // Already confirmed done for another sender sharing this link — don't ask again.
+          byHand++;
+          store.record(sender.senderEmail, link);
+          ui.info(pc.green(`  ✓ ${sender.senderEmail} — link already done in browser`));
+          await file(sender);
+          continue;
+        }
         if (prompting && link) {
           const answer = await askDoneInBrowser(link);
           if (answer === "timeout") {
@@ -214,8 +240,8 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
           } else if (answer) {
             byHand++;
             store.record(sender.senderEmail, link);
-            filedIds.push(...sender.ids);
             ui.info(pc.green(`  ✓ ${sender.senderEmail} — done in browser`));
+            await file(sender);
             continue;
           }
         }
@@ -233,10 +259,11 @@ export async function unsubscribeCommand(opts: Opts): Promise<void> {
         `${senders.length - ok - byHand - skipped - manual} failed/unsupported.`,
     );
 
-    // --then: file the existing mail of senders that are unsubscribed (new + prior).
-    if (opts.then && filedIds.length > 0) {
-      const moved = await jmap.moveEmailsTo(filedIds, opts.then);
-      ui.info(pc.green(`Moved ${moved} message${moved === 1 ? "" : "s"} to "${opts.then}".`));
+    if (opts.then) {
+      ui.info(
+        pc.green(`Moved ${moved} message${moved === 1 ? "" : "s"} to "${opts.then}".`) +
+          (moveFailed ? pc.red(` ${moveFailed} could not be moved — re-run to retry.`) : ""),
+      );
     }
   }
 }
@@ -269,15 +296,19 @@ const PROMPT_TIMEOUT_MS = 60_000;
  * is still flushed by the caller's finally).
  */
 async function askDoneInBrowser(link: string): Promise<boolean | "timeout"> {
-  const signal = AbortSignal.timeout(PROMPT_TIMEOUT_MS);
+  // A cancellable timer, not AbortSignal.timeout: clack never removes its
+  // abort listener, so a signal that fires after this prompt was answered
+  // would close it again — turning off raw mode under the *next* prompt.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROMPT_TIMEOUT_MS);
   const answer = await confirm({
     message: `Open ${pc.cyan(link)}\n  Unsubscribed in the browser?`,
     initialValue: false,
     output: process.stderr,
-    signal,
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
   if (isCancel(answer)) {
-    if (signal.aborted) return "timeout";
+    if (controller.signal.aborted) return "timeout";
     throw new Error("Cancelled.");
   }
   return answer;
