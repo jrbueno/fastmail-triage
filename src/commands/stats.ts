@@ -106,7 +106,7 @@ function day(iso: string | null): string {
 }
 
 export async function statsCommand(opts: Opts): Promise<void> {
-  if (!(opts.top > 0)) throw new Error("--top must be a positive number.");
+  if (!(opts.top > 0)) throw new Error('--top must be a positive number or "all".');
   if (!opts.all && !(opts.limit > 0)) throw new Error("--limit must be a positive number.");
   const limit = opts.all ? Infinity : opts.limit;
   const accounts = resolveAccounts(opts.account);
@@ -176,14 +176,18 @@ export async function statsCommand(opts: Opts): Promise<void> {
       continue;
     }
 
-    ui.header("Folders");
-    ui.table({
-      head: ["Folder", "Total", "Unread"],
-      colWidths: [40, 9, 9],
-      rows: folders
-        .filter((f) => f.total > 0 || f.role !== null)
-        .map((f) => [f.path, String(f.total), f.unread ? String(f.unread) : pc.dim("0")]),
-    });
+    // The all-folders overview only when no folder was asked for; with
+    // --mailbox the report is about that one folder.
+    if (!opts.mailbox) {
+      ui.header("Folders");
+      ui.table({
+        head: ["Folder", "Total", "Unread"],
+        colWidths: [40, 9, 9],
+        rows: folders
+          .filter((f) => f.total > 0 || f.role !== null)
+          .map((f) => [f.path, String(f.total), f.unread ? String(f.unread) : pc.dim("0")]),
+      });
+    }
 
     ui.header(`${where}: ${slice.emails} emails scanned`);
     if (slice.emails === 0) continue;
@@ -198,7 +202,11 @@ export async function statsCommand(opts: Opts): Promise<void> {
     const flags = (s: SenderStat) =>
       [s.replied ? "wrote" : "", s.unsubscribed ? "unsub'd" : ""].filter(Boolean).join(" ");
 
-    ui.header(`Top ${topStats.length} senders by volume`);
+    ui.header(
+      topStats.length === ranked.length
+        ? `All ${topStats.length} senders by volume`
+        : `Top ${topStats.length} of ${ranked.length} senders by volume`,
+    );
     ui.table({
       head: ["Sender", "Email", "#", "Opened", "Kind", "Verdict", "Last", "Flags"],
       colWidths: [20, 32, 6, 8, 11, 13, 12, 10],
@@ -230,7 +238,7 @@ export async function statsCommand(opts: Opts): Promise<void> {
         `Unsubscribe with: fastmail-triage unsubscribe -s <email> --apply`,
     );
     const hidden = eligible.length - ignored.length;
-    if (hidden > 0) ui.info(pc.dim(`${hidden} more not shown; raise --top to see them.`));
+    if (hidden > 0) ui.info(pc.dim(`${hidden} more not shown; raise --top (or --top all) to see them.`));
     const vetoed = ignoredPool.length - eligible.length;
     if (vetoed > 0) ui.info(pc.dim(`${vetoed} skipped because you've written to them.`));
   }
