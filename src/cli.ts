@@ -38,7 +38,7 @@ program
   .option("--include-pinned", "triage pinned (flagged) mail too; by default it's never fetched, classified, or moved", false)
   .option("--skip-unsubscribed", "file mail from already-unsubscribed senders straight to Triage/Unsubscribe (no model call)", false)
   .option("--no-ai", "zero-token mode: classify from bulk-mail headers + Sent history only")
-  .option("--reclassify", "ignore cached sender verdicts and classify again", false)
+  .option("--use-cache", "file senders decided in an earlier run from sender-verdicts.json (no model call)", false)
   .option("--dry-run", "preview only — don't move anything", false)
   .option("--json", "output raw JSON (implies no moving)", false)
   .action((opts) => run(() => triageCommand(opts)));

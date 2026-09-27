@@ -34,7 +34,7 @@ interface Opts {
   json?: boolean;
   dryRun?: boolean;
   ai?: boolean; // --no-ai → false: zero-token heuristics only
-  reclassify?: boolean; // ignore cached sender verdicts
+  useCache?: boolean; // file senders from cached sender verdicts
 }
 
 // Parent mailbox + child mailbox (leaf) names that emails are moved into.
@@ -126,7 +126,8 @@ export async function triageCommand(opts: Opts): Promise<void> {
       continue;
     }
 
-    // ── 2. Free tiers: unsubscribe store + cached sender verdicts ───────────
+    // ── 2. Free tiers: unsubscribe store + cached sender verdicts (opt-in) ──
+    // Verdicts are recorded every run, so the cache is current when opted into.
     const unsubStore = opts.skipUnsubscribed ? new UnsubStore(account.name) : null;
     const verdictStore = new SenderVerdictStore(account.name);
 
@@ -138,7 +139,7 @@ export async function triageCommand(opts: Opts): Promise<void> {
         classified.push({ id: e.id, category: "unsubscribe", reason: "already unsubscribed", email: e });
         continue;
       }
-      const cached = opts.reclassify ? null : verdictStore.get(sender);
+      const cached = opts.useCache ? verdictStore.get(sender) : null;
       if (cached) {
         classified.push({ id: e.id, category: cached, reason: "cached sender verdict", email: e });
         continue;
