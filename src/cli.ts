@@ -35,6 +35,7 @@ program
   .option("--oldest", "start with the oldest emails instead of newest", false)
   .option("--all", "include read mail, not just unread", false)
   .option("--unread", "unread only (use with --all to drain every unread email)", false)
+  .option("--include-pinned", "triage pinned (flagged) mail too; by default it's never fetched, classified, or moved", false)
   .option("--skip-unsubscribed", "file mail from already-unsubscribed senders straight to Triage/Unsubscribe (no model call)", false)
   .option("--no-ai", "zero-token mode: classify from bulk-mail headers + Sent history only")
   .option("--reclassify", "ignore cached sender verdicts and classify again", false)
