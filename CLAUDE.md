@@ -55,7 +55,8 @@ New JMAP capability belongs in `JmapClient`, not in the engine wrapper.
 cost tiers cheapest-first. Understanding this order is the key to the file:
 
 1. **Stores (0 tokens)** — `UnsubStore` (`--skip-unsubscribed`) and
-   `SenderVerdictStore` short-circuit senders decided in an earlier run.
+   `SenderVerdictStore` (`--use-cache`) short-circuit senders decided in an
+   earlier run. Both are opt-in; verdicts are still recorded every run.
 2. **Group by sender + Sent-history check (0 tokens)** — `groupBySender` in
    `src/heuristics.ts` aggregates per sender from RFC 2369/2919 headers; then
    `jmap.hasRepliedTo` answers "has the user ever written to this sender?" for
