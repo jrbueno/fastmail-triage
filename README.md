@@ -50,7 +50,7 @@ bun run src/cli.ts triage --include-pinned    # triage pinned (flagged) mail too
 bun run src/cli.ts triage --skip-unsubscribed # already-unsubscribed senders → Unsubscribe, no model call
 bun run src/cli.ts triage --no-ai             # zero tokens: header heuristics + Sent history only
 bun run src/cli.ts triage --min-confidence 0.5 # hold back more uncertain verdicts (default 0.3)
-bun run src/cli.ts triage --reclassify        # ignore cached sender verdicts
+bun run src/cli.ts triage --use-cache         # file senders decided in an earlier run, no model call
 bun run src/cli.ts triage --account all       # every configured account
 bun run src/cli.ts limits                     # show + probe Fastmail's JMAP limits (read-only)
 bun run src/cli.ts stats                      # folder totals, top senders, never-opened lists (no model calls)
@@ -178,7 +178,7 @@ Env vars (or `.env`):
 
 **State files** (under `FASTMAIL_TRIAGE_HOME`): `unsubscribed.json` — senders
 already unsubscribed; `sender-verdicts.json` — cached per-sender triage
-verdicts (bulk categories only), consulted on every run unless `--reclassify`.
+verdicts (bulk categories only), written every run and consulted only with `--use-cache`.
 
 ## How it works
 
@@ -212,7 +212,7 @@ big inbox gets cheaper as the unsubscribe list grows.
 A run works through cost tiers, cheapest first:
 
 1. **Stores (0 tokens).** Already-unsubscribed senders (`--skip-unsubscribed`)
-   and every sender classified in a previous run
+   and, with `--use-cache`, every sender classified in a previous run
    (`sender-verdicts.json` — bulk categories only) are filed without any API
    call. Recurring triage gets cheaper every run.
 2. **Sender-level classification.** Remaining mail is grouped by sender.
