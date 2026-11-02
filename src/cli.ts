@@ -27,7 +27,7 @@ const accountOpt = ["-a, --account <name>", 'account name, or "all" for every ac
 
 program
   .command("triage")
-  .description("Sort mail into reply / fyi / offers / newsletter / politics / noise and file it under Triage/")
+  .description("Sort mail into reply / fyi / offers / newsletter / politics / career / noise and file it under Triage/")
   .option(...accountOpt)
   .option("-n, --limit <n>", "max emails to process", (v) => parseInt(v, 10), 50)
   .option("--min-confidence <n>", "leave mail in place when the model's confidence is below this (0-1)", parseFloat, DEFAULT_MIN_CONFIDENCE)

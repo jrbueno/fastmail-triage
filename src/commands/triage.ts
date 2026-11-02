@@ -48,6 +48,7 @@ export const MAILBOX_NAMES: Record<Category, string> = {
   offers: "Offers",
   newsletter: "Newsletter",
   politics: "Politics",
+  career: "Career",
   unsubscribe: "Unsubscribe",
   noise: "Noise",
 };
@@ -58,6 +59,7 @@ const LABELS: Record<Category, string> = {
   offers: "Offers",
   newsletter: "Newsletter",
   politics: "Politics",
+  career: "Career",
   unsubscribe: "Unsubscribe",
   noise: "Noise / Skip",
 };
@@ -68,12 +70,13 @@ const COLOR: Record<Category, (s: string) => string> = {
   offers: (s) => pc.magenta(s),
   newsletter: (s) => pc.blue(s),
   politics: (s) => pc.green(s),
+  career: (s) => pc.bold(pc.yellow(s)),
   unsubscribe: (s) => pc.bold(pc.cyan(s)),
   noise: (s) => pc.dim(s),
 };
 
 function emptyTotals(): Record<Category, number> {
-  return { reply: 0, fyi: 0, offers: 0, newsletter: 0, politics: 0, unsubscribe: 0, noise: 0 };
+  return { reply: 0, fyi: 0, offers: 0, newsletter: 0, politics: 0, career: 0, unsubscribe: 0, noise: 0 };
 }
 
 interface Classified {

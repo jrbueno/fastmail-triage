@@ -1,7 +1,7 @@
 /**
  * Persistent cache of the model's per-sender triage verdicts, so mail from a
  * sender classified once is filed for free on every later run. Only bulk
- * categories (offers / newsletter / politics / unsubscribe / noise) are cached —
+ * categories (offers / newsletter / politics / career / unsubscribe / noise) are cached —
  * "reply" and "fyi" depend on the individual message, never on the sender alone.
  *
  * Stored at $FASTMAIL_TRIAGE_HOME/sender-verdicts.json:
@@ -18,6 +18,7 @@ export const CACHEABLE_CATEGORIES: ReadonlySet<Category> = new Set([
   "offers",
   "newsletter",
   "politics",
+  "career",
   "unsubscribe",
   "noise",
 ]);

@@ -127,6 +127,7 @@ const SHORT: Record<Category, string> = {
   offers: "offer",
   newsletter: "newsl",
   politics: "polit",
+  career: "career",
   unsubscribe: "unsub",
   noise: "noise",
 };
