@@ -4,7 +4,7 @@ AI-powered Fastmail inbox assistant. Six commands:
 
 | Command | What it does |
 |---|---|
-| `triage` | Sorts mail into **Needs Reply / FYI / Offers / Newsletter / Politics / Unsubscribe / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
+| `triage` | Sorts mail into **Needs Reply / FYI / Offers / Newsletter / Politics / Career / Unsubscribe / Noise** and files each email into a `Triage/` child mailbox in Fastmail. |
 | `unsubscribe` | Finds newsletters & promo senders and **actually unsubscribes** via `List-Unsubscribe` (one-click POST or mailto), with a human-in-the-loop review step. |
 | `stats` | Zero-token report: folder totals, the shape of a folder (unread, list, automated), top senders with their cached verdicts, and mailing lists you never open. |
 | `calibrate` | Runs the classifier over mail that's already filed, measures accuracy at each confidence threshold, and recommends a `--min-confidence`. |
@@ -190,7 +190,7 @@ JMAP  →  Email JSON  →  TypeSafe Jev (triage, unsubscribe) / Claude (find, f
 
 `triage` is the only command that writes: it **moves** each classified email
 into a `Triage/` child mailbox (`Needs Reply`, `FYI`, `Offers`, `Newsletter`,
-`Politics`, `Noise`), which removes it from the source folder. The `Triage/` folders are
+`Politics`, `Career`, `Noise`), which removes it from the source folder. The `Triage/` folders are
 **created automatically** if missing (only the children actually needed for a
 run). Use `--dry-run` to preview without moving, `--oldest` to process the
 oldest mail first, and `--mailbox <name>` to triage a folder other than Inbox.

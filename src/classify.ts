@@ -23,6 +23,7 @@ export type Category =
   | "offers"
   | "newsletter"
   | "politics"
+  | "career"
   | "unsubscribe"
   | "noise";
 export const CATEGORIES: Category[] = [
@@ -31,6 +32,7 @@ export const CATEGORIES: Category[] = [
   "offers",
   "newsletter",
   "politics",
+  "career",
   "unsubscribe",
   "noise",
 ];
@@ -64,7 +66,7 @@ const CATEGORY_CRITERIA = {
   },
   fyi: {
     covers: "Mail the user would want to have seen even though no reply is needed: receipts, shipping and delivery updates, security alerts, bills, statements, confirmations, personal-but-informational notes.",
-    not_for: "Automated chatter with no lasting value, which is 'noise'.",
+    not_for: "Automated chatter with no lasting value, which is 'noise'. Job-application confirmations and status updates ('career').",
     examples: [
       "Amazon <ship@amazon.com>: 'Your package has shipped'",
       "Chase <alerts@chase.com>: 'Your statement is ready'",
@@ -81,7 +83,7 @@ const CATEGORY_CRITERIA = {
   },
   newsletter: {
     covers: "Recurring editorial or digest content the user subscribed to: articles, roundups, product updates. Includes general news publications that cover politics.",
-    not_for: "Mail pushing a sale ('offers'). Digests from campaigns or advocacy groups ('politics'). Unopened low-value blasts ('unsubscribe').",
+    not_for: "Mail pushing a sale ('offers'). Digests from campaigns or advocacy groups ('politics'). Job-listing digests and job alerts ('career'). Unopened low-value blasts ('unsubscribe').",
     examples: [
       "Stratechery <ben@stratechery.com>: 'The Weekly Article: Platform shifts' (read)",
       "GitHub <noreply@github.com>: 'Your weekly digest of repository activity'",
@@ -95,9 +97,18 @@ const CATEGORY_CRITERIA = {
       "Sierra Club <action@sierraclub.org>: 'Tell your senator: vote NO on the drilling bill'",
     ],
   },
+  career: {
+    covers: "Job-search mail: job alerts and job-board listing digests, 'jobs you may be interested in' recommendations, recruiter and staffing-agency outreach, and automated application confirmations or status updates from employers and applicant-tracking systems. Applies whether or not the user reads it.",
+    not_for: "A specific recruiter or hiring manager personally waiting on the user, such as scheduling an interview or answering an offer ('reply'). Generic professional-network pings like profile views or connection suggestions ('noise'). Industry news newsletters that merely mention hiring ('newsletter').",
+    examples: [
+      "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>: '30+ new jobs for Senior Software Engineer'",
+      "Indeed <alert@indeed.com>: 'New product manager jobs in Austin, TX'",
+      "Acme Careers <no-reply@greenhouse.io>: 'Thank you for applying to Acme'",
+    ],
+  },
   unsubscribe: {
     covers: "Low-value recurring bulk, promotional, or newsletter mail the user is not engaging with and should stop receiving. Strongest when the mail is left unopened, the sender is generic mass-marketing, and the user has never written to it.",
-    not_for: "Promos or newsletters from a brand or publication the user plausibly cares about, or that the user has opened ('offers' / 'newsletter'). Political mail ('politics').",
+    not_for: "Promos or newsletters from a brand or publication the user plausibly cares about, or that the user has opened ('offers' / 'newsletter'). Political mail ('politics'). Job alerts and recruiter mail, even unopened ('career').",
     examples: [
       "RandomBoutique <promo@shopxyz.com>: 'Dear friend, 70% off everything!!!' (unopened)",
       "DealsDaily <blast@dealsdaily.net>: 'You won't believe these prices' (unopened)",
@@ -105,7 +116,7 @@ const CATEGORY_CRITERIA = {
   },
   noise: {
     covers: "Automated notifications or spam that fit none of the other folders and are safe to ignore: social pings, 'someone viewed your profile', app nudges.",
-    not_for: "Receipts, alerts, bills, and other notices worth having seen ('fyi').",
+    not_for: "Receipts, alerts, bills, and other notices worth having seen ('fyi'). Job alerts, job recommendations, and recruiter messages ('career').",
     examples: [
       "LinkedIn <notify@linkedin.com>: 'You appeared in 9 searches this week'",
       "Nextdoor <digest@nextdoor.com>: 'New replies in your neighborhood'",
@@ -116,6 +127,7 @@ const CATEGORY_CRITERIA = {
 const GUIDANCE = [
   "Judge by the primary purpose of the mail, not its format.",
   "Political content outranks format: a political fundraising ask is 'politics', not 'offers'.",
+  "Job-search content outranks format: a job-alert digest is 'career', not 'newsletter' or 'noise'.",
 ];
 
 const emailQuestion = choice(
