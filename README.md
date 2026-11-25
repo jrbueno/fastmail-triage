@@ -16,6 +16,13 @@ engine, [TypeSafe](https://typesafe.ai)'s Jev model for the classification in `t
 `unsubscribe`, and [Claude](https://www.anthropic.com) for the generative work (`find`, `filters`). **Multiple Fastmail accounts**
 are supported — run any command against one account or `--account all`.
 
+> [!WARNING]
+> This tool acts on your real mailbox. `triage` **moves mail** into `Triage/*`
+> folders, and `unsubscribe --apply` **contacts senders** (one-click POSTs,
+> `mailto:` sends, and unsubscribe links from email bodies). Start with
+> `triage --dry-run` (or `--json` / `--no-ai`) and run `unsubscribe` without
+> `--apply` to preview what would happen.
+
 ## Setup (local)
 
 Requires [Bun](https://bun.sh) and the Rust engine binary.
@@ -300,3 +307,10 @@ a known sender's mail without re-sending unsubscribe requests.
 
 `unsubscribe` only contacts senders when you pass `--apply`. `filters` is
 read-only — it produces suggestions you act on yourself in Fastmail.
+
+## License
+
+[MIT](LICENSE). The JMAP engine,
+[`radiosilence/fastmail-cli`](https://github.com/radiosilence/fastmail-cli), is a
+separate project under its own license; it isn't bundled here — you install it
+yourself (or the Docker build fetches it).
